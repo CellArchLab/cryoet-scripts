@@ -4,7 +4,12 @@
 Currently the following scritps are available:
 
 * `cryocare/cryocare_pipeline`
+  - Dependencies:
+    - [cryoCARE_pip](https://github.com/juglab/cryoCARE_pip)
+    - [IMOD](https://bio3d.colorado.edu/imod/)
 * `isonet/isonet_pipeline`
+  - Dependencies:
+    - [IsoNet](https://github.com/IsoNet-cryoET/IsoNet)
 
 These scripts offer a streamlined way of running the entire pipelines of cryo-CARE and IsoNet each with a single command line. By defaults the jobs are submitted to a computing cluster managed by SLURM, but optionally they can also be run locally.
 
