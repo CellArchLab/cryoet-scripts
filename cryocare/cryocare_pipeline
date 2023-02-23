@@ -1,0 +1,503 @@
+#!/bin/bash
+
+module purge
+# module load cryoCARE
+
+SCRIPTS_HOME="/scicore/home/engel0006/GROUP/pool-engel/soft/cryo-care/cryoCARE_pip/scripts"
+
+# cd $SCRIPTS_HOME
+
+print_help () {
+
+cat <<fin
+cryocare_pipeline_scicore
+This script offers a a simple command line interface for running the CRYO-CARE pipeline on the sciCORE cluster.
+Usage:
+
+cryocare_pipeline_scicore --even <even tomograms> --odd <odd tomograms> --out <output tomograms> --model <model name without extension> [--number-subtomos <number of subtomograms to extract for training>] [--boxsize <box size in pixels>] [--split <fraction of subtomograms to use for training>] [--epochs <number of training epochs>] [--steps <number of steps per epoch>] [--batch <number of subtomograms per batch>] [--skiptraining <y/n>] [--partition <SLURM partition where to run the job>]
+
+Note: the order of the parameters does not matter. Parameters in brackets are optional.
+Options:
+--even:                tomogram reconstruction(s) from even frames in MRC file format
+--odd:                 tomogram reconstruction(s) from odd frames in MRC file format. If providing multiple files, they must be in the same order as the even tomograms.
+--evenstack:           tilt series from even frames in MRC file format. Currently only one file is supported. Only used if option --recdir is set.
+--oddstack:            tilt series from odd frames in MRC file format. Currently only one file is supported. Only used if option --recdir is set.
+--recdir:              IMOD reconstruction directory where odd/even tomograms from the tilt series given with the options --evenstack and --oddstack will be generated. This directory needs to contain newst.com and tilt.com files to work.
+--bin:                 Override binning level for odd/even tomogram reconstructions with this value. Only used if option --recdir is set. Default: 0 (no override)
+--out:                 output tomogram(s) in MRC file format. If providing multiple files, they must be in the same order as the even and odd tomograms. If output files are to be stored in a different directory, the directory must exist.
+--model:               name of model to be used for prediction, without extension. If doing training, this is the name of the model to be created.
+--number-subtomos, -n: number of subtomograms to extract for training. Default: 1600
+--boxsize, -b:         box size in pixels. Default: 72
+--split, -sp:          fraction of subtomograms to use for training. Default: 0.8
+--depth, -d:           Depth of the neural network (number of layers). Default: 3
+--epochs, -e:          number of training epochs. Default: 100
+--steps, -st:          number of steps per epoch. Default: 100
+--batch, -st:          number of subtomograms per batch. Default: 32
+--skiptraining:        whether to skip the training (i.e. predict only) or not. Default: n
+--subcmd               Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
+--partition, -p:       SLURM partition where to run the job: a100, rtx8000, titanx or pascal. Default: a100
+--qos, q:              SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are gpu6hours, gpu1day, gpu1week, 30min, 6hours, 1day, 1week, 2weeks, infinite. Default: gpu6hours
+--help, -h:            print this message.
+
+fin
+
+}
+
+if [[ $# == 0 ]]; then
+  print_help
+  exit 0
+fi
+
+# Default values:
+depth=3
+nsubtomos=1600
+boxsize=72
+split=0.8
+epochs=100
+steps=100
+batch=32
+skiptraining=n
+partition=a100
+qos=gpu6hours
+subcmd=sbatch
+bin=0
+
+
+# Parse arguments:
+POSITIONAL_ARGS=()
+eventomos=()
+oddtomos=()
+outputs=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --even)
+      # eventomo="$2"
+      # shift # past argument
+      # shift # past value
+      while (( "$#" >= 2 )) && ! [[ $2 = -* ]]; do
+        eventomos+=( "$2" )
+        shift
+      done
+      ;;
+    --odd)
+      # oddtomo="$2"
+      # shift # past argument
+      # shift # past value
+      while (( "$#" >= 2 )) && ! [[ $2 = -* ]]; do
+        oddtomos+=( "$2" )
+        shift
+      done
+      ;;
+    --out|-o)
+      # output="$2"
+      # shift # past argument
+      # shift # past value
+      while (( "$#" >= 2 )) && ! [[ $2 = -* ]]; do
+        outputs+=( "$2" )
+        shift
+      done
+      ;;
+    --evenstack)
+      evenstack="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --oddstack)
+      oddstack="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --recdir)
+      recdir="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --bin)
+      bin="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --number-subtomos|-n)
+      nsubtomos="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --boxsize|-b)
+      boxsize="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --depth|-d)
+      depth="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --epochs|-e)
+      epochs="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --steps|-st)
+      steps="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --split|-sp)
+      split="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --batch)
+      batch="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --model|-m)
+      modelname="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --out)
+      output="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --skiptraining)
+      skiptraining="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --partition|-p)
+      partition="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --qos|-q)
+      qos="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --subcmd)
+      qos="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --help|-h)
+      print_help
+      exit 0
+      ;;
+    -*|--*)
+      echo "Unknown option $1"
+      exit 1
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1") # save positional arg
+      shift # past argument
+      ;;
+  esac
+done
+
+# set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
+
+if [[ ! "$recdir" == "" ]]; then
+
+  cat <<fin
+Will first reconstruct odd/even tomograms with following inputs:
+
+evenstack = $evenstack
+oddstack = $oddstack
+recdir = $recdir
+
+Then will run cryo-CARE with following inputs:
+
+fin
+
+  cd "$recdir"
+
+  cp newst.com newst_even.com
+  cp newst.com newst_odd.com
+  cp tilt.com tilt_even.com
+  cp tilt.com tilt_odd.com
+
+# Include the desired binning level:
+if [[ ${bin} > 0 ]]; then
+
+  sed -i 's/BinByFactor.*/BinByFactor '$bin'/g' newst_even.com
+  sed -i 's/BinByFactor.*/BinByFactor '$bin'/g' newst_odd.com
+
+  sed -i 's/IMAGEBINNED.*/IMAGEBINNED '$bin'/g' tilt_even.com
+  sed -i 's/IMAGEBINNED.*/IMAGEBINNED '$bin'/g' tilt_odd.com
+
+fi
+
+# Add the SuperSampleFactor parameter to tilt.com if not already present:
+grep SuperSampleFactor tilt.com
+if [[ $? == 1 ]]; then
+
+  sed -i '/^$if.*/i SuperSampleFactor 2' tilt_even.com 
+  sed -i '/^$if.*/i SuperSampleFactor 2' tilt_odd.com 
+
+fi
+
+  evenstack=`basename $evenstack`
+  oddstack=`basename $oddstack`
+
+  instack=`grep InputFile newst_even.com | awk '{print $2}'`
+  instack=`basename $instack`
+  outstack=`grep OutputFile newst_even.com | awk '{print $2}'`
+  outstack=`basename $outstack`
+  outstackeven="${outstack%.*}_EVN.mrc"
+  outstackodd="${outstack%.*}_ODD.mrc"
+  sed -i "s|$instack|$evenstack|g" newst_even.com
+  sed -i "s|$outstack|$outstackeven|g" newst_even.com
+  sed -i "s|$instack|$oddstack|g" newst_odd.com
+  sed -i "s|$outstack|$outstackodd|g" newst_odd.com
+
+  outrecorg=`grep OutputFile tilt_even.com | awk '{print $2}'`
+  outrec=`basename $outrecorg`
+  outreceven="${outrec%.*}_EVN.mrc"
+  outrecodd="${outrec%.*}_ODD.mrc"
+  sed -i "s|$outstack|$outstackeven|g" tilt_even.com
+  sed -i "s|$outrecorg|$outreceven|g" tilt_even.com
+  sed -i "s|$outstack|$outstackodd|g" tilt_odd.com
+  sed -i "s|$outrecorg|$outrecodd|g" tilt_odd.com
+
+  eventomos=`realpath "$outreceven"`
+  oddtomos=`realpath "$outrecodd"`
+
+  cd $OLDPWD
+
+fi
+
+if [[ "$eventomos" == "" ]]; then
+  echo "Please provide the even tomogram file name."
+  exit 1
+fi 
+if [[ "$oddtomos" == "" ]]; then
+  echo "Please provide the even tomogram file name."
+  exit 1
+fi 
+if [[ "$outputs" == "" ]]; then
+  echo "Please provide the output tomogram file name."
+  exit 1
+fi 
+if [[ "$modelname" == "" ]]; then
+  echo "Please provide the model name."
+  exit 1
+fi 
+
+modelname=`realpath "$modelname"`
+
+cat <<fin
+depth = $depth
+nsubtomos = $nsubtomos
+boxsize = $boxsize
+split = $split
+epochs = $epochs
+steps = $steps
+batch = $batch
+skiptraining = $skiptraining
+partition = $partition
+qos = $qos
+model = ${modelname}
+eventomos = ${eventomos[@]}
+oddtomos = ${oddtomos[@]}
+outputs = ${outputs[@]}
+
+fin
+
+case $partition in
+  a100)
+  ngpu=4
+  ;;
+  rtx8000)
+  ngpu=2
+  ;;
+  pascal)
+  ngpu=6
+  ;;
+  titanx)
+  ngpu=6
+  qos=emgpu
+  ;;
+  *)
+  echo "Warning: unknown partition $partition! Type 'sinfo' to see partitions available."
+  echo "Consult the sciCORE user guide for more details: https://wiki.biozentrum.unibas.ch/display/scicore/4.+Queues+and+partitions"
+  exit 1
+esac
+
+if [[ "$skiptraining" == "y" ]]; then
+  ngpu=1
+fi
+
+cat > submit_cryocare.sh <<fin
+#!/bin/bash
+# Standard output and error:
+#SBATCH -o cryocare.out%j
+# Initial working directory:
+#SBATCH -D ./
+# Job Name:
+#SBATCH -J cryocare
+# Queue (Partition):
+#SBATCH --partition=${partition} 
+# Number of nodes and MPI tasks per node:
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=${ngpu}
+#SBATCH --gres=gpu:${ngpu}
+#
+#SBATCH --mail-type=none
+#SBATCH --mem 24G
+#
+# Wall clock limit:
+#SBATCH --qos=${qos}
+
+module purge
+module load cryoCARE
+fin
+
+if [[ ! "$recdir" == "" ]]; then
+
+  cat >> submit_cryocare.sh <<fin
+
+module load IMOD
+echo "Reconstructing odd/even tomograms from stacks..."
+
+cd $recdir
+
+submfg newst_even.com
+submfg newst_odd.com
+submfg tilt_even.com
+submfg tilt_odd.com
+clip rotx $eventomos $eventomos &
+clip rotx $oddtomos $oddtomos
+
+cd \$OLDPWD
+echo "Done reconstructing!"
+
+fin
+
+fi
+
+
+cat >> submit_cryocare.sh <<fin
+
+echo "Copying input data to scratch disk..."
+cp -L ${eventomos[@]} ${oddtomos[@]} \$TMPDIR
+echo "Done copying!"
+
+fin
+
+
+if [[ $skiptraining == "n" ]]; then
+
+  cat >train_data_config.json <<fin
+{
+  "even": [
+fin
+  for i in "${eventomos[@]}"; do
+    if [[ "$i" == "${eventomos[-1]}" ]]; then
+      echo "\"`basename "${i}"`\"" >> train_data_config.json
+    else
+      echo "\"`basename "${i}"`\"," >> train_data_config.json
+    fi
+  done
+  cat >>train_data_config.json <<fin
+  ],
+  "odd": [
+fin
+  for i in "${oddtomos[@]}"; do
+    if [[ "$i" == "${oddtomos[-1]}" ]]; then
+      echo "\"`basename "${i}"`\"" >> train_data_config.json
+    else
+      echo "\"`basename "${i}"`\"," >> train_data_config.json
+    fi
+  done
+  cat >>train_data_config.json <<fin
+  ],
+  "patch_shape": [
+    $boxsize,
+    $boxsize,
+    $boxsize
+  ],
+  "num_slices": $nsubtomos,
+  "split": $split,
+  "tilt_axis": "Y",
+  "n_normalization_samples": 500,
+  "path": "./",
+  "overwrite": true
+}
+fin
+
+echo "" >> submit_cryocare.sh
+echo "cd \$TMPDIR" >> submit_cryocare.sh
+echo "" >> submit_cryocare.sh
+echo "srun time cryoCARE_extract_train_data.py --conf \$OLDPWD/train_data_config.json" >> submit_cryocare.sh
+echo "" >> submit_cryocare.sh
+echo "cp train_data.npz val_data.npz \$OLDPWD" >> submit_cryocare.sh
+echo "" >> submit_cryocare.sh
+
+  cat >train_config.json <<fin
+{
+  "train_data": "./",
+  "epochs": $epochs,
+  "steps_per_epoch": $steps,
+  "batch_size": $batch,
+  "unet_kern_size": 3,
+  "unet_n_depth": $depth,
+  "unet_n_first": 32,
+  "learning_rate": 0.0004,
+  "model_name": "${modelname}",
+  "path": "./"
+}
+fin
+echo "srun time cryoCARE_train_distributed.py --conf \$OLDPWD/train_config.json" >> submit_cryocare.sh
+echo "" >> submit_cryocare.sh
+# echo "cp ${modelname}.tar.gz \$OLDPWD" >> submit_cryocare.sh
+echo "" >> submit_cryocare.sh
+fi
+
+if [[ $skiptraining == "y" ]]; then
+  echo "cp ${modelname}.tar.gz \$TMPDIR" >> submit_cryocare.sh
+  echo "cd \$TMPDIR" >> submit_cryocare.sh
+  echo "" >> submit_cryocare.sh
+fi
+
+
+n=0
+for i in "${eventomos[@]}"; do
+  ((m=n+1))
+
+  eventomobase=`basename ${eventomos[${n}]}`
+  oddtomobase=`basename ${oddtomos[${n}]}`
+
+  cat >predict_config_$m.json <<fin
+{
+  "path": "${modelname}.tar.gz",
+  "even": "${eventomobase}",
+  "odd": "${oddtomobase}",
+  "n_tiles": [4, 4, 4],
+  "output": "denoised",
+  "overwrite": true
+}
+fin
+
+  echo "srun time cryoCARE_predict.py --conf \$OLDPWD/predict_config_$m.json" >> submit_cryocare.sh
+  echo "cd \$OLDPWD" >> submit_cryocare.sh
+  # We switch back to the original directory because the output path might have been specified in relation to that:
+  echo "cp -r \$TMPDIR/denoised/`basename ${eventomos[${n}]}` ${outputs[n]}" >> submit_cryocare.sh
+  # And then go back to $TMPDIR to predict the next tomogram
+  echo "cd \$TMPDIR" >> submit_cryocare.sh
+  echo "" >> submit_cryocare.sh
+
+  ((n=n+1))
+
+done
+
+echo "cd \$OLDPWD" >> submit_cryocare.sh
+echo "echo \"Done running CRYO-CARE.\"" >> submit_cryocare.sh
+echo "" >> submit_cryocare.sh
+
+${subcmd} submit_cryocare.sh

@@ -1,0 +1,192 @@
+#!/bin/bash
+
+module purge
+# module load IsoNet
+
+SCRIPTS_HOME="/scicore/home/engel0006/GROUP/pool-engel/soft/isonet/scripts/"
+
+# cd $SCRIPTS_HOME
+
+print_help () {
+
+  cat <<fin 
+isonet_pipeline_scicore
+This script offers a a simple command line interface for running the IsoNet pipeline on the sciCORE cluster.
+Usage:
+
+isonet_pipeline_scicore <list of tomograms in MRC format> [--apix <pixel size in Angstroms>] [--number-subtomos <number of subtomograms to extract per tomogram>] [--boxsize <box size in pixels>]
+
+Note: Multiple input tomograms can be given. The order of the parameters does not matter. Parameters in brackets are optional.
+Options
+-a, --apix               pixel size in Angstroms. Default: 1.0
+-n, --number-subtomos    number of subtomograms to extract per tomogram. Default: 100
+-b, --boxsize            box size in pixels. Must be a multiple of 8. The actual subtomograms will have a box size of 16 + this value. Default: 72
+--subcmd                 Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
+--partition, -p:         SLURM partition where to run the job. For sciCORE these are a100, rtx8000, titanx or pascal. Default: a100
+--qos, q:                SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are gpu6hours, gpu1day, gpu1week, 30min, 6hours, 1day, 1week, 2weeks, infinite. Default: gpu1day
+--help, -h:              print this message.
+
+fin
+
+}
+
+if [[ $# == 0 ]]; then
+  print_help
+  exit 0
+fi
+
+# Default values:
+apix=1.0
+nsubtomos=100
+boxsize=72
+partition=a100
+qos=gpu1day
+subcmd=sbatch
+
+POSITIONAL_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --apix|-a)
+      apix="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --number-subtomos|-n)
+      nsubtomos="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --boxsize|-b)
+      boxsize="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --partition|-p)
+      partition="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --qos|-q)
+      qos="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --subcmd)
+      qos="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --help|-h)
+      print_help
+      exit 0
+      ;;
+    -*|--*)
+      echo "Unknown option $1"
+      exit 1
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1") # save positional arg
+      shift # past argument
+      ;;
+  esac
+done
+
+# set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
+
+# Print arguments for user to check:
+cat <<fin
+apix = ${apix}
+boxsize = ${boxsize}
+number subtomos = ${nsubtomos}
+tomograms = ${POSITIONAL_ARGS[@]}
+qos = ${qos}
+partition = ${partition}
+fin
+
+case $partition in
+  a100)
+  ngpu=4
+  ;;
+  rtx8000)
+  ngpu=2
+  ;;
+  pascal)
+  ngpu=6
+  ;;
+  titanx)
+  ngpu=6
+  qos=emgpu
+  ;;
+  *)
+  echo "Warning: unknown partition $partition! Type 'sinfo' to see partitions available."
+  echo "Consult the sciCORE user guide for more details: https://wiki.biozentrum.unibas.ch/display/scicore/4.+Queues+and+partitions"
+  exit 1
+esac
+
+# Generate submission script:
+cat > submit_isonet.sh<<fin
+#!/bin/bash
+# Standard output and error:
+#SBATCH -o isonet.out%j
+# Initial working directory:
+#SBATCH -D ./
+# Job Name:
+#SBATCH -J isonet
+# Queue (Partition):
+#SBATCH --partition=${partition} 
+# Number of nodes and MPI tasks per node:
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=${ngpu}
+#SBATCH --gres=gpu:${ngpu}
+#
+#SBATCH --mail-type=none
+#SBATCH --mem 64G
+#
+# Wall clock limit:
+# Wall clock limit:
+#SBATCH --qos=${qos}
+ 
+module purge
+module load IsoNet/0.2
+
+echo "Copying data to scratch disk..."
+cp -L ${POSITIONAL_ARGS[@]} \$TMPDIR && echo "Done copying!"
+
+cd \$TMPDIR
+ 
+srun isonet.py prepare_star . --output_star isonet_tomos.star --pixel_size ${apix} --number_subtomos ${nsubtomos}
+ 
+# Create a default mask, but only for the first tomogram in the list:
+srun isonet.py make_mask isonet_tomos.star --mask_folder mask --z_crop 0.35 --density_percentage 100 --std_percentage 100 --tomo_idx 1
+
+# Now we modify the input STAR file to use the same mask for all tomos:
+awk '{if (NF<=2) {print} else {if (!(\$9 == "None")) {mask=\$9; print} else {\$9=mask; print} }}' isonet_tomos.star > isonet_tomos.star.tmp
+mv isonet_tomos.star.tmp isonet_tomos.star
+ 
+srun time isonet.py extract isonet_tomos.star --subtomo_folder subtomos --subtomo_star isonet_subtomos.star --cube_size ${boxsize} --use_deconv_tomo False
+
+echo \$CUDA_VISIBLE_DEVICES
+srun time isonet.py refine isonet_subtomos.star --iterations 30 --result_dir results --gpuID \$CUDA_VISIBLE_DEVICES
+echo "Cleaning up intermediate data..."
+rm -rf results/training_noise/ results/*.mrc results/data/ && echo "Done cleaning up!"
+cp -r results/ \$OLDPWD && echo "Done copying!"
+ 
+echo \$CUDA_VISIBLE_DEVICES
+srun time isonet.py predict isonet_tomos.star ./results/model_iter30.h5 --output_dir corrected --gpuID \$CUDA_VISIBLE_DEVICES
+
+echo "Cleaning up intermediate data..."
+rm -rf ${POSITIONAL_ARGS[@]} && echo "Done cleaning up!"
+
+echo "Finished running the pipeline, now copying results to filesystem..."
+rsync -au * \$OLDPWD && echo "Done copying!"
+
+cd \$OLDPWD
+echo ""
+echo "Done running IsoNet!"
+fin
+
+# Launch it:
+${subcmd} submit_isonet.sh
