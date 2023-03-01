@@ -169,7 +169,7 @@ mv isonet_tomos.star.tmp isonet_tomos.star
 srun time isonet.py extract isonet_tomos.star --subtomo_folder subtomos --subtomo_star isonet_subtomos.star --cube_size ${boxsize} --use_deconv_tomo False
 
 echo \$CUDA_VISIBLE_DEVICES
-srun time isonet.py refine isonet_subtomos.star --iterations 30 --result_dir results --gpuID \$CUDA_VISIBLE_DEVICES
+srun time isonet.py refine isonet_subtomos.star --iterations 30 --result_dir results --remove_intermediate True --gpuID \$CUDA_VISIBLE_DEVICES
 echo "Cleaning up intermediate data..."
 rm -rf results/training_noise/ results/*.mrc results/data/ && echo "Done cleaning up!"
 cp -r results/ \$OLDPWD && echo "Done copying!"
@@ -177,11 +177,8 @@ cp -r results/ \$OLDPWD && echo "Done copying!"
 echo \$CUDA_VISIBLE_DEVICES
 srun time isonet.py predict isonet_tomos.star ./results/model_iter30.h5 --output_dir corrected --gpuID \$CUDA_VISIBLE_DEVICES
 
-echo "Cleaning up intermediate data..."
-rm -rf ${POSITIONAL_ARGS[@]} && echo "Done cleaning up!"
-
 echo "Finished running the pipeline, now copying results to filesystem..."
-rsync -au * \$OLDPWD && echo "Done copying!"
+cp -r corrected/ \$OLDPWD && echo "Done copying!"
 
 cd \$OLDPWD
 echo ""
