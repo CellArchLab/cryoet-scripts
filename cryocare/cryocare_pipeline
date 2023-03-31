@@ -14,7 +14,7 @@ cryocare_pipeline_scicore
 This script offers a a simple command line interface for running the CRYO-CARE pipeline on the sciCORE cluster.
 Usage:
 
-cryocare_pipeline_scicore --even <even tomograms> --odd <odd tomograms> --out <output tomograms> --model <model name without extension> [--number-subtomos <number of subtomograms to extract for training>] [--boxsize <box size in pixels>] [--split <fraction of subtomograms to use for training>] [--epochs <number of training epochs>] [--steps <number of steps per epoch>] [--batch <number of subtomograms per batch>] [--skiptraining <y/n>] [--partition <SLURM partition where to run the job>]
+cryocare_pipeline --even <even tomograms> --odd <odd tomograms> --out <output tomograms> --model <model name without extension> [--number-subtomos <number of subtomograms to extract for training>] [--boxsize <box size in pixels>] [--split <fraction of subtomograms to use for training>] [--epochs <number of training epochs>] [--steps <number of steps per epoch>] [--batch <number of subtomograms per batch>] [--skiptraining <y/n>] [--partition <SLURM partition where to run the job>]
 
 Note: the order of the parameters does not matter. Parameters in brackets are optional.
 Options:

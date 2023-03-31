@@ -14,7 +14,7 @@ isonet_pipeline_scicore
 This script offers a a simple command line interface for running the IsoNet pipeline on the sciCORE cluster.
 Usage:
 
-isonet_pipeline_scicore <list of tomograms in MRC format> [--apix <pixel size in Angstroms>] [--number-subtomos <number of subtomograms to extract per tomogram>] [--boxsize <box size in pixels>]
+isonet_pipeline <list of tomograms in MRC format> [--apix <pixel size in Angstroms>] [--number-subtomos <number of subtomograms to extract per tomogram>] [--boxsize <box size in pixels>]
 
 Note: Multiple input tomograms can be given. The order of the parameters does not matter. Parameters in brackets are optional.
 Options
