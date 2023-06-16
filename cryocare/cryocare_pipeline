@@ -434,7 +434,7 @@ fin
 echo "" >> submit_cryocare.sh
 echo "cd \$TMPDIR" >> submit_cryocare.sh
 echo "" >> submit_cryocare.sh
-echo "srun time cryoCARE_extract_train_data.py --conf \$OLDPWD/train_data_config.json" >> submit_cryocare.sh
+echo "time cryoCARE_extract_train_data.py --conf \$OLDPWD/train_data_config.json" >> submit_cryocare.sh
 echo "" >> submit_cryocare.sh
 echo "cp train_data.npz val_data.npz \$OLDPWD" >> submit_cryocare.sh
 echo "" >> submit_cryocare.sh
@@ -453,7 +453,7 @@ echo "" >> submit_cryocare.sh
   "path": "./"
 }
 fin
-echo "srun time cryoCARE_train_distributed.py --conf \$OLDPWD/train_config.json" >> submit_cryocare.sh
+echo "time cryoCARE_train.py --conf \$OLDPWD/train_config.json" >> submit_cryocare.sh
 echo "" >> submit_cryocare.sh
 # echo "cp ${modelname}.tar.gz \$OLDPWD" >> submit_cryocare.sh
 echo "" >> submit_cryocare.sh
@@ -484,7 +484,7 @@ for i in "${eventomos[@]}"; do
 }
 fin
 
-  echo "srun time cryoCARE_predict.py --conf \$OLDPWD/predict_config_$m.json" >> submit_cryocare.sh
+  echo "time cryoCARE_predict.py --conf \$OLDPWD/predict_config_$m.json" >> submit_cryocare.sh
   echo "cd \$OLDPWD" >> submit_cryocare.sh
   # We switch back to the original directory because the output path might have been specified in relation to that:
   echo "cp -r \$TMPDIR/denoised/`basename ${eventomos[${n}]}` ${outputs[n]}" >> submit_cryocare.sh
