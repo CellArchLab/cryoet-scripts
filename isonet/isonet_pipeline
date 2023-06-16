@@ -157,25 +157,25 @@ cp -L ${POSITIONAL_ARGS[@]} \$TMPDIR && echo "Done copying!"
 
 cd \$TMPDIR
  
-srun isonet.py prepare_star . --output_star isonet_tomos.star --pixel_size ${apix} --number_subtomos ${nsubtomos}
+isonet.py prepare_star . --output_star isonet_tomos.star --pixel_size ${apix} --number_subtomos ${nsubtomos}
  
 # Create a default mask, but only for the first tomogram in the list:
-srun isonet.py make_mask isonet_tomos.star --mask_folder mask --z_crop 0.35 --density_percentage 100 --std_percentage 100 --tomo_idx 1
+isonet.py make_mask isonet_tomos.star --mask_folder mask --z_crop 0.35 --density_percentage 100 --std_percentage 100 --tomo_idx 1
 
 # Now we modify the input STAR file to use the same mask for all tomos:
 awk '{if (NF<=2) {print} else {if (!(\$9 == "None")) {mask=\$9; print} else {\$9=mask; print} }}' isonet_tomos.star > isonet_tomos.star.tmp
 mv isonet_tomos.star.tmp isonet_tomos.star
  
-srun time isonet.py extract isonet_tomos.star --subtomo_folder subtomos --subtomo_star isonet_subtomos.star --cube_size ${boxsize} --use_deconv_tomo False
+time isonet.py extract isonet_tomos.star --subtomo_folder subtomos --subtomo_star isonet_subtomos.star --cube_size ${boxsize} --use_deconv_tomo False
 
 echo \$CUDA_VISIBLE_DEVICES
-srun time isonet.py refine isonet_subtomos.star --iterations 30 --result_dir results --remove_intermediate True --gpuID \$CUDA_VISIBLE_DEVICES
+time isonet.py refine isonet_subtomos.star --iterations 30 --result_dir results --remove_intermediate True --gpuID \$CUDA_VISIBLE_DEVICES
 echo "Cleaning up intermediate data..."
 rm -rf results/training_noise/ results/*.mrc results/data/ && echo "Done cleaning up!"
 cp -r results/ \$OLDPWD && echo "Done copying!"
  
 echo \$CUDA_VISIBLE_DEVICES
-srun time isonet.py predict isonet_tomos.star ./results/model_iter30.h5 --output_dir corrected --gpuID \$CUDA_VISIBLE_DEVICES
+time isonet.py predict isonet_tomos.star ./results/model_iter30.h5 --output_dir corrected --gpuID \$CUDA_VISIBLE_DEVICES
 
 echo "Finished running the pipeline, now copying results to filesystem..."
 cp -r corrected/ \$OLDPWD && echo "Done copying!"
