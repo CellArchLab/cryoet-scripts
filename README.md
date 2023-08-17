@@ -10,6 +10,10 @@ Currently the following scritps are available:
 * `isonet/isonet_pipeline`
   - Dependencies:
     - [IsoNet](https://github.com/IsoNet-cryoET/IsoNet)
+* `locspiral/locspiral_cli`
+  - Dependencies:
+    - [LocSpiral-LocBSharpen-LocBFactor-LocOccupancy](https://github.com/1aviervargas/LocSpiral-LocBSharpen-LocBFactor-LocOccupancy/)
+    - [MATLAB](https://ch.mathworks.com/products/matlab.html) 
 
 These scripts offer a streamlined way of running the entire pipelines of cryo-CARE and IsoNet each with a single command line. By default the jobs are submitted to a computing cluster managed by SLURM, but optionally they can also be run locally.
 

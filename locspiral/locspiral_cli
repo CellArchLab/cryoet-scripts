@@ -1,0 +1,128 @@
+#!/bin/bash
+
+# Check if we are on sciCORE cluster:
+if [ `hostname | grep bc2.ch | echo $?` -eq 0 ]; then 
+  module purge
+  module load LocSpiral
+  module load MATLAB
+fi
+
+print_help () {
+
+  cat <<fin 
+locspiral_cli
+This script offers a a simple command line interface for running LocSpiral.
+Usage:
+
+locspiral_cli --half1 <half-map 1> --half2 <half-map 2> --mask <mask file> --out <output rootname> --apix <pixel size> [--minres <lowest resolution>] [--maxres <maximum resolution>] [--noisethr <threshold value>] [--bw <bandwith value>]
+
+Note: Multiple input tomograms can be given. The order of the parameters does not matter. Parameters in brackets are optional.
+
+Options:
+--half1                  Input half-map 1 (.mrc/.em format)
+--half2                  Input half-map 2 (.mrc/.em format)
+--mask                   Input mask (.mrc/.em format)
+--out                    Output rootname (i.e. without extension)
+--apix                   Pixel size in Angstroms. Default: 1.0
+--minres                 Minimum resolution to consider in Angstroms. Default: 200 A
+--maxres                 Minimum resolution to consider in Angstroms. Default: 15 A
+--noisethr               Noise significance threshold. Suggested values: 0.90-0.95. Default: 0.90
+--bw                     bandwith ("sharpness") of the bandpass filter applied in Fourier Space. For high-resolution maps (<5 A) suggested values are in the range of 3.5-5. For low-resolution maps or maps with high heterogeneity values in the range 6-8 work better. Default: 8
+--help, -h:              print this message.
+
+fin
+
+}
+
+if [[ $# == 0 ]]; then
+  print_help
+  exit 0
+fi
+
+# Default values:
+apix=1.0
+minres=200.0
+maxres=15.0
+noisethr=0.9
+bw=8.0
+
+POSITIONAL_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --half1)
+      half1="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --half2)
+      half2="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --out)
+      out="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --mask)
+      mask="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --apix)
+      apix="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --minres)
+      minres="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --maxres)
+      maxres="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --noisethr)
+      noisethr="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --bw)
+      bw="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --help|-h)
+      print_help
+      exit 0
+      ;;
+    -*|--*)
+      echo "Unknown option $1"
+      exit 1
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1") # save positional arg
+      shift # past argument
+      ;;
+  esac
+done
+
+# set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
+
+# Print arguments for user to check:
+cat <<fin
+half1 = ${half1}
+half2 = ${half2}
+out = ${out}
+mask = ${mask}
+apix = ${apix}
+minres = ${minres}
+maxres = ${maxres}
+noisethr = ${noisethr}
+bw = ${bw}
+fin
+
+matlab -batch "run_locspiral('$half1','$half2','$out','$mask',$apix,$minres,$maxres,$noisethr,$bw)"
