@@ -26,13 +26,14 @@ Options:
 --bin:                 Override binning level for odd/even tomogram reconstructions with this value. Only used if option --recdir is set. Default: 0 (no override)
 --out:                 output tomogram(s) in MRC file format. If providing multiple files, they must be in the same order as the even and odd tomograms. If output files are to be stored in a different directory, the directory must exist.
 --model:               name of model to be used for prediction, without extension. If doing training, this is the name of the model to be created.
---number-subtomos, -n: number of subtomograms to extract for training. Default: 1600
+--number-subtomos, -n: number of subtomograms to extract for training. Default: 1200
 --boxsize, -b:         box size in pixels. Default: 72
---split, -sp:          fraction of subtomograms to use for training. Default: 0.8
+--split, -sp:          fraction of subtomograms to use for training. Default: 0.9
 --depth, -d:           Depth of the neural network (number of layers). Default: 3
 --epochs, -e:          number of training epochs. Default: 100
 --steps, -st:          number of steps per epoch. Default: 100
 --batch, -st:          number of subtomograms per batch. Default: 32
+--nfirst, -nf:         number of initial feature channels in the network architecture. Default: 32
 --skiptraining:        whether to skip the training (i.e. predict only) or not. Default: n
 --subcmd               Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
 --partition, -p:       SLURM partition where to run the job: a100, rtx8000, titanx or pascal. Default: a100
@@ -50,12 +51,13 @@ fi
 
 # Default values:
 depth=3
-nsubtomos=1600
+nsubtomos=1200
 boxsize=72
-split=0.8
+split=0.9
 epochs=100
 steps=100
 batch=32
+nfirst=32
 skiptraining=n
 partition=a100
 qos=gpu6hours
@@ -150,6 +152,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --batch)
       batch="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --nfirst|-nf)
+      nfirst="$2"
       shift # past argument
       shift # past value
       ;;
@@ -297,6 +304,7 @@ split = $split
 epochs = $epochs
 steps = $steps
 batch = $batch
+nfirst = $nfirst
 skiptraining = $skiptraining
 partition = $partition
 qos = $qos
@@ -447,7 +455,7 @@ echo "" >> submit_cryocare.sh
   "batch_size": $batch,
   "unet_kern_size": 3,
   "unet_n_depth": $depth,
-  "unet_n_first": 32,
+  "unet_n_first": $nfirst,
   "learning_rate": 0.0004,
   "model_name": "${modelname}",
   "path": "./"
