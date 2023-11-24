@@ -3,14 +3,10 @@
 module purge
 # module load cryoCARE
 
-SCRIPTS_HOME="/scicore/home/engel0006/GROUP/pool-engel/soft/cryo-care/cryoCARE_pip/scripts"
-
-# cd $SCRIPTS_HOME
-
 print_help () {
 
 cat <<fin
-cryocare_pipeline_scicore
+cryocare_pipeline
 This script offers a a simple command line interface for running the CRYO-CARE pipeline on the sciCORE cluster.
 Usage:
 
