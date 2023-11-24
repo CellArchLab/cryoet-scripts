@@ -35,6 +35,7 @@ Options:
 --batch, -st:          number of subtomograms per batch. Default: 32
 --nfirst, -nf:         number of initial feature channels in the network architecture. Default: 32
 --skiptraining:        whether to skip the training (i.e. predict only) or not. Default: n
+--skipprediction:        whether to skip prediction (i.e. train only) or not. Default: n
 --subcmd               Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
 --partition, -p:       SLURM partition where to run the job: a100, rtx8000, titanx or pascal. Default: a100
 --qos, q:              SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are gpu6hours, gpu1day, gpu1week, 30min, 6hours, 1day, 1week, 2weeks, infinite. Default: gpu6hours
@@ -59,6 +60,7 @@ steps=100
 batch=32
 nfirst=32
 skiptraining=n
+skipprediction=n
 partition=a100
 qos=gpu6hours
 subcmd=sbatch
@@ -172,6 +174,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skiptraining)
       skiptraining="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --skipprediction)
+      skipprediction="$2"
       shift # past argument
       shift # past value
       ;;
@@ -306,6 +313,7 @@ steps = $steps
 batch = $batch
 nfirst = $nfirst
 skiptraining = $skiptraining
+skipprediction = $skipprediction
 partition = $partition
 qos = $qos
 model = ${modelname}
@@ -474,14 +482,15 @@ if [[ $skiptraining == "y" ]]; then
 fi
 
 
-n=0
-for i in "${eventomos[@]}"; do
-  ((m=n+1))
+if [[ $skipprediction == "n" ]]; then
+  n=0
+  for i in "${eventomos[@]}"; do
+    ((m=n+1))
 
-  eventomobase=`basename ${eventomos[${n}]}`
-  oddtomobase=`basename ${oddtomos[${n}]}`
+    eventomobase=`basename ${eventomos[${n}]}`
+    oddtomobase=`basename ${oddtomos[${n}]}`
 
-  cat >predict_config_$m.json <<fin
+    cat >predict_config_$m.json <<fin
 {
   "path": "${modelname}.tar.gz",
   "even": "${eventomobase}",
@@ -492,17 +501,18 @@ for i in "${eventomos[@]}"; do
 }
 fin
 
-  echo "time cryoCARE_predict.py --conf \$OLDPWD/predict_config_$m.json" >> submit_cryocare.sh
-  echo "cd \$OLDPWD" >> submit_cryocare.sh
-  # We switch back to the original directory because the output path might have been specified in relation to that:
-  echo "cp -r \$TMPDIR/denoised/`basename ${eventomos[${n}]}` ${outputs[n]}" >> submit_cryocare.sh
-  # And then go back to $TMPDIR to predict the next tomogram
-  echo "cd \$TMPDIR" >> submit_cryocare.sh
-  echo "" >> submit_cryocare.sh
+    echo "time cryoCARE_predict.py --conf \$OLDPWD/predict_config_$m.json" >> submit_cryocare.sh
+    echo "cd \$OLDPWD" >> submit_cryocare.sh
+    # We switch back to the original directory because the output path might have been specified in relation to that:
+    echo "cp -r \$TMPDIR/denoised/`basename ${eventomos[${n}]}` ${outputs[n]}" >> submit_cryocare.sh
+    # And then go back to $TMPDIR to predict the next tomogram
+    echo "cd \$TMPDIR" >> submit_cryocare.sh
+    echo "" >> submit_cryocare.sh
 
-  ((n=n+1))
+    ((n=n+1))
 
-done
+  done
+fi
 
 echo "cd \$OLDPWD" >> submit_cryocare.sh
 echo "echo \"Done running CRYO-CARE.\"" >> submit_cryocare.sh
