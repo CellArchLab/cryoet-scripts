@@ -21,6 +21,7 @@ Options
 -a, --apix               pixel size in Angstroms. Default: 1.0
 -n, --number-subtomos    number of subtomograms to extract per tomogram. Default: 100
 -b, --boxsize            box size in pixels. Must be a multiple of 8. The actual subtomograms will have a box size of 16 + this value. Default: 72
+--bytes                  convert predicted tomograms to bytes (MRC mode 0, with mean 127 and standard deviation of 10) to save space. IMOD needs to be available. Default: y
 --subcmd                 Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
 --partition, -p:         SLURM partition where to run the job. For sciCORE these are a100, rtx8000, titanx or pascal. Default: a100
 --qos, q:                SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are gpu6hours, gpu1day, gpu1week, 30min, 6hours, 1day, 1week, 2weeks, infinite. Default: gpu1day
@@ -151,6 +152,7 @@ cat > submit_isonet.sh<<fin
  
 module purge
 module load IsoNet/0.2
+module load IMOD
 
 echo "Copying data to scratch disk..."
 cp -L ${POSITIONAL_ARGS[@]} \$TMPDIR && echo "Done copying!"
@@ -177,13 +179,32 @@ cp -r results/ \$OLDPWD && echo "Done copying!"
 echo \$CUDA_VISIBLE_DEVICES
 time isonet.py predict isonet_tomos.star ./results/model_iter30.h5 --output_dir corrected --gpuID \$CUDA_VISIBLE_DEVICES
 
+fin
+
+if [[ $bytes == "n" ]]; then
+  cat >> submit_isonet.sh<<fin
 echo "Finished running the pipeline, now copying results to filesystem..."
 cp -r corrected/ \$OLDPWD && echo "Done copying!"
 
 cd \$OLDPWD
 echo ""
 echo "Done running IsoNet!"
+
 fin
+
+else
+
+  cat >> submit_isonet.sh<<fin
+echo "Finished running the pipeline, now copying results to filesystem in bytes mode..."
+mkdir -p \$OLDPWD/corrected
+for t in corrected/*.mrc; do densmatch -s $t -target 127,10 -all -mode 0 -output \$OLDPWD/$t; done && echo "Done copying!"
+cd \$OLDPWD
+echo ""
+echo "Done running IsoNet!"
+
+fin  
+
+fi
 
 # Launch it:
 ${subcmd} submit_isonet.sh
