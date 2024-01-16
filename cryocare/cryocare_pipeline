@@ -27,7 +27,7 @@ Options:
 --split, -sp:          fraction of subtomograms to use for training. Default: 0.9
 --depth, -d:           Depth of the neural network (number of layers). Default: 3
 --epochs, -e:          number of training epochs. Default: 100
---steps, -st:          number of steps per epoch. Default: 100
+--steps, -st:          number of steps per epoch. Default: 200
 --batch, -st:          number of subtomograms per batch. Default: 32
 --nfirst, -nf:         number of initial feature channels in the network architecture. Default: 32
 --skiptraining:        whether to skip the training (i.e. predict only) or not. Default: n
@@ -52,7 +52,7 @@ nsubtomos=1200
 boxsize=72
 split=0.9
 epochs=100
-steps=100
+steps=200
 batch=32
 nfirst=32
 skiptraining=n
@@ -319,31 +319,33 @@ outputs = ${outputs[@]}
 
 fin
 
-case $partition in
-  a100)
-  ngpu=4
-  ;;
-  rtx8000)
-  ngpu=2
-  ;;
-  pascal)
-  ngpu=6
-  ;;
-  titanx)
-  ngpu=6
-  qos=emgpu
-  ;;
-  *)
-  echo "Warning: unknown partition $partition! Type 'sinfo' to see partitions available."
-  echo "Consult the sciCORE user guide for more details: https://wiki.biozentrum.unibas.ch/display/scicore/4.+Queues+and+partitions"
-  exit 1
-esac
+if [[ "$skiptraining" == "n" ]]; then
+  case $partition in
+    a100)
+    ngpu=4
+    ;;
+    rtx8000)
+    ngpu=2
+    ;;
+    pascal)
+    ngpu=6
+    ;;
+    titanx)
+    ngpu=6
+    qos=emgpu
+    ;;
+    *)
+    echo "Warning: unknown partition $partition! Type 'sinfo' to see partitions available."
+    echo "Consult the sciCORE user guide for more details: https://wiki.biozentrum.unibas.ch/display/scicore/4.+Queues+and+partitions"
+    exit 1
+  esac
+fi
 
 if [[ "$skiptraining" == "y" ]]; then
   ngpu=1
 fi
 
-cat > submit_cryocare.sh <<fin
+cat > submit_cryocare_$$.sh <<fin
 #!/bin/bash
 # Standard output and error:
 #SBATCH -o cryocare.out%j
@@ -372,7 +374,7 @@ fin
 
 if [[ ! "$recdir" == "" ]]; then
 
-  cat >> submit_cryocare.sh <<fin
+  cat >> submit_cryocare_$$.sh <<fin
 
 module load IMOD
 echo "Reconstructing odd/even tomograms from stacks..."
@@ -394,7 +396,7 @@ fin
 fi
 
 
-cat >> submit_cryocare.sh <<fin
+cat >> submit_cryocare_$$.sh <<fin
 
 echo "Copying input data to scratch disk..."
 cp -L ${eventomos[@]} ${oddtomos[@]} \$TMPDIR
@@ -443,13 +445,13 @@ fin
 }
 fin
 
-echo "" >> submit_cryocare.sh
-echo "cd \$TMPDIR" >> submit_cryocare.sh
-echo "" >> submit_cryocare.sh
-echo "time cryoCARE_extract_train_data.py --conf \$OLDPWD/train_data_config.json" >> submit_cryocare.sh
-echo "" >> submit_cryocare.sh
-echo "cp train_data.npz val_data.npz \$OLDPWD" >> submit_cryocare.sh
-echo "" >> submit_cryocare.sh
+echo "" >> submit_cryocare_$$.sh
+echo "cd \$TMPDIR" >> submit_cryocare_$$.sh
+echo "" >> submit_cryocare_$$.sh
+echo "time cryoCARE_extract_train_data.py --conf \$OLDPWD/train_data_config.json" >> submit_cryocare_$$.sh
+echo "" >> submit_cryocare_$$.sh
+echo "cp train_data.npz val_data.npz \$OLDPWD" >> submit_cryocare_$$.sh
+echo "" >> submit_cryocare_$$.sh
 
   cat >train_config.json <<fin
 {
@@ -465,16 +467,16 @@ echo "" >> submit_cryocare.sh
   "path": "./"
 }
 fin
-echo "time cryoCARE_train.py --conf \$OLDPWD/train_config.json" >> submit_cryocare.sh
-echo "" >> submit_cryocare.sh
-# echo "cp ${modelname}.tar.gz \$OLDPWD" >> submit_cryocare.sh
-echo "" >> submit_cryocare.sh
+echo "time cryoCARE_train.py --conf \$OLDPWD/train_config.json" >> submit_cryocare_$$.sh
+echo "" >> submit_cryocare_$$.sh
+# echo "cp ${modelname}.tar.gz \$OLDPWD" >> submit_cryocare_$$.sh
+echo "" >> submit_cryocare_$$.sh
 fi
 
 if [[ $skiptraining == "y" ]]; then
-  echo "cp ${modelname}.tar.gz \$TMPDIR" >> submit_cryocare.sh
-  echo "cd \$TMPDIR" >> submit_cryocare.sh
-  echo "" >> submit_cryocare.sh
+  echo "cp ${modelname}.tar.gz \$TMPDIR" >> submit_cryocare_$$.sh
+  echo "cd \$TMPDIR" >> submit_cryocare_$$.sh
+  echo "" >> submit_cryocare_$$.sh
 fi
 
 
@@ -486,7 +488,7 @@ if [[ $skipprediction == "n" ]]; then
     eventomobase=`basename ${eventomos[${n}]}`
     oddtomobase=`basename ${oddtomos[${n}]}`
 
-    cat >predict_config_$m.json <<fin
+    cat >predict_config_$$_$m.json <<fin
 {
   "path": "${modelname}.tar.gz",
   "even": "${eventomobase}",
@@ -497,21 +499,21 @@ if [[ $skipprediction == "n" ]]; then
 }
 fin
 
-    echo "time cryoCARE_predict.py --conf \$OLDPWD/predict_config_$m.json" >> submit_cryocare.sh
-    echo "cd \$OLDPWD" >> submit_cryocare.sh
+    echo "time cryoCARE_predict.py --conf \$OLDPWD/predict_config_$$_$m.json" >> submit_cryocare_$$.sh
+    echo "cd \$OLDPWD" >> submit_cryocare_$$.sh
     # We switch back to the original directory because the output path might have been specified in relation to that:
-    echo "cp -r \$TMPDIR/denoised/`basename ${eventomos[${n}]}` ${outputs[n]}" >> submit_cryocare.sh
+    echo "cp -r \$TMPDIR/denoised/`basename ${eventomos[${n}]}` ${outputs[n]}" >> submit_cryocare_$$.sh
     # And then go back to $TMPDIR to predict the next tomogram
-    echo "cd \$TMPDIR" >> submit_cryocare.sh
-    echo "" >> submit_cryocare.sh
+    echo "cd \$TMPDIR" >> submit_cryocare_$$.sh
+    echo "" >> submit_cryocare_$$.sh
 
     ((n=n+1))
 
   done
 fi
 
-echo "cd \$OLDPWD" >> submit_cryocare.sh
-echo "echo \"Done running CRYO-CARE.\"" >> submit_cryocare.sh
-echo "" >> submit_cryocare.sh
+echo "cd \$OLDPWD" >> submit_cryocare_$$.sh
+echo "echo \"Done running CRYO-CARE.\"" >> submit_cryocare_$$.sh
+echo "" >> submit_cryocare_$$.sh
 
-${subcmd} submit_cryocare.sh
+${subcmd} submit_cryocare_$$.sh
