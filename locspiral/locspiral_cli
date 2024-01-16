@@ -25,7 +25,7 @@ Options:
 --out                    Output rootname (i.e. without extension)
 --apix                   Pixel size in Angstroms. Default: 1.0
 --minres                 Minimum resolution to consider in Angstroms. Default: 200 A
---maxres                 Minimum resolution to consider in Angstroms. Default: 15 A
+--maxres                 Maximum resolution to consider in Angstroms. Default: 15 A
 --noisethr               Noise significance threshold. Suggested values: 0.90-0.95. Default: 0.90
 --bw                     bandwith ("sharpness") of the bandpass filter applied in Fourier Space. For high-resolution maps (<5 A) suggested values are in the range of 3.5-5. For low-resolution maps or maps with high heterogeneity values in the range 6-8 work better. Default: 8
 --help, -h:              print this message.
