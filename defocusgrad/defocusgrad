@@ -1,0 +1,290 @@
+#!/bin/env python
+
+import argparse
+import os
+import subprocess
+import mrcfile
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
+
+ext = ".png" # Extension for saving the plots
+
+parser = argparse.ArgumentParser(description="""
+                                 
+Calculate and plot defocus handedness for an aligned tilt series.
+NOTE: the script expects IMOD and CTFFIND4 to be available in PATH.
+                                 
+This is script is based off the implementation from Stefano Scaramuzza and Daniel Castaño-Diez available at https://github.com/LBEM-CH/TomographyTools
+                                 
+""")
+
+parser.add_argument("--st", 
+                    type=str, 
+                    required=True, 
+                    help="Path to input unaligned tilt series stack in MRC format, preferably NOT dose-filtered."
+                    )
+parser.add_argument("--xf", 
+                    type=str, 
+                    required=True, 
+                    help="Path to IMOD .xf file for aligning the tilt series."
+                    )
+parser.add_argument("--tlt", 
+                    type=str, 
+                    required=True, 
+                    help="Path to .tlt file with tilt angles (one per line as in IMOD format)."
+                    )
+parser.add_argument("--bin", 
+                    type=int,
+                    default=1, 
+                    required=False, 
+                    help="Binning factor for aligned left/right stacks."
+                    )
+parser.add_argument("--newst_options", 
+                    type=str,
+                    default="-antialias 5 -linear -taper 1,0 -origin", 
+                    required=False, 
+                    help="Additional options to IMOD's newstack program."
+                    )
+parser.add_argument("--kV", 
+                    type=float,
+                    default=300.0, 
+                    required=False, 
+                    help="Acceleration voltage in kV."
+                    )
+parser.add_argument("--Cs", 
+                    type=float,
+                    default=2.7, 
+                    required=False, 
+                    help="Spherical aberration in mm."
+                    )
+parser.add_argument("--Ac", 
+                    type=float,
+                    default=0.07, 
+                    required=False, 
+                    help="Amplitude contrast."
+                    )
+parser.add_argument("--spectrum_boxsize", 
+                    type=int,
+                    default=512, 
+                    required=False, 
+                    help="Size of amplitude spectrum to compute in pixels."
+                    )
+parser.add_argument("--minres", 
+                    type=float,
+                    default=30.0, 
+                    required=False, 
+                    help="Minimum resolution in Å."
+                    )
+parser.add_argument("--maxres", 
+                    type=float,
+                    default=5.0, 
+                    required=False, 
+                    help="Maximum resolution in Å."
+                    )
+parser.add_argument("--mindef", 
+                    type=float,
+                    default=5000.0, 
+                    required=False, 
+                    help="Minimum defocus in Å."
+                    )
+parser.add_argument("--maxdef", 
+                    type=float,
+                    default=50000.0, 
+                    required=False, 
+                    help="Maximum defocus in Å."
+                    )
+parser.add_argument("--stepdef", 
+                    type=float,
+                    default=100.0, 
+                    required=False, 
+                    help="Defocus search step in Å."
+                    )
+parser.add_argument("--slow", 
+                    type=str,
+                    default="no", 
+                    required=False, 
+                    help="Slower, more exhaustive search?"
+                    )
+parser.add_argument("--phaseshift", 
+                    type=str,
+                    default="no", 
+                    required=False, 
+                    help="Find additional phase shift?"
+                    )
+
+args = parser.parse_args()
+# If you want to print usage information
+if not args.st:
+    parser.print_help()
+
+# Get unbinned stack dimensions:
+with mrcfile.open(args.st, permissive=True) as mrc:
+    stdim = mrc.header["nx"], mrc.header["ny"], mrc.header["nz"]
+    apix = mrc.voxel_size.x
+
+print("\nPixel size of %s is %.3f Å" % (args.st, apix))
+print("If this is not correct, you have to adjust the MRC file header!\n")
+
+# Get rootname of aligned stack:
+stfilename = os.path.basename(args.st)
+strootname, _ = os.path.splitext(stfilename)
+
+# Get left side of aligned tilt series:
+# newstack -in MTEC_tomo055-dose_filt.st -ou MTEC_tomo055-dose_filt-right.ali -xform MTEC_tomo055-dose_filt.xf -bin 4 -linear -antialias 5 -size 464,928 -offset +928,0
+# Get right side of aligned tilt series:
+# newstack -in MTEC_tomo055-dose_filt.st -ou MTEC_tomo055-dose_filt-left.ali -xform MTEC_tomo055-dose_filt.xf -bin 4 -linear -antialias 5 -size 464,928 -offset -928,0
+
+paramDictLeft = {}
+paramDictLeft['input'] = args.st
+paramDictLeft['output'] = strootname + '_ali_left.mrc'
+paramDictLeft['xform'] = args.xf
+paramDictLeft['offset_x'] = -stdim[0]//4
+paramDictLeft['offset_y'] = 0
+paramDictLeft['bin'] = args.bin
+paramDictLeft['outsize_x'] = stdim[0]//paramDictLeft['bin']//2
+paramDictLeft['outsize_y'] = stdim[1]//paramDictLeft['bin'] 
+paramDictLeft['extraopts'] = args.newst_options
+
+newst_left_com = "`which newstack` -in %(input)s "
+newst_left_com += "-ou  %(output)s " 
+newst_left_com += "-xform %(xform)s " 
+newst_left_com += "-offset %(offset_x)d,%(offset_y)d " 
+newst_left_com += "-bin %(bin)d "
+newst_left_com += "-size %(outsize_x)d,%(outsize_y)d "
+newst_left_com += "%(extraopts)s"
+
+print("Generating left-side aligned stack...\n")
+newst_left_out = subprocess.run([newst_left_com % paramDictLeft], capture_output=True, text=True, shell=True)
+
+paramDictRight = {}
+paramDictRight['input'] = args.st
+paramDictRight['output'] = strootname + '_ali_right.mrc'
+paramDictRight['xform'] = args.xf
+paramDictRight['offset_x'] = +stdim[0]//4
+paramDictRight['offset_y'] = 0
+paramDictRight['bin'] = args.bin
+paramDictRight['outsize_x'] = stdim[0]//paramDictRight['bin']//2
+paramDictRight['outsize_y'] = stdim[1]//paramDictRight['bin'] 
+paramDictRight['extraopts'] = args.newst_options
+
+newst_right_com = "`which newstack` -in %(input)s "
+newst_right_com += "-ou  %(output)s " 
+newst_right_com += "-xform %(xform)s " 
+newst_right_com += "-offset %(offset_x)d,%(offset_y)d " 
+newst_right_com += "-bin %(bin)d "
+newst_right_com += "-size %(outsize_x)d,%(outsize_y)d "
+newst_right_com += "%(extraopts)s"
+
+print("Generating right-side aligned stack...\n")
+newst_right_out = subprocess.run([newst_right_com % paramDictRight], capture_output=True, text=True, shell=True)
+
+paramDictCtfFind = {}
+paramDictCtfFind['ismovie'] = "no"
+paramDictCtfFind['apix'] = apix * args.bin
+paramDictCtfFind['kv'] = args.kV
+paramDictCtfFind['cs'] = args.Cs
+paramDictCtfFind['ac'] = args.Ac
+paramDictCtfFind['specbox'] = args.spectrum_boxsize
+paramDictCtfFind['minres'] = args.minres
+paramDictCtfFind['maxres'] = args.maxres
+paramDictCtfFind['mindef'] = args.mindef
+paramDictCtfFind['maxdef'] = args.maxdef
+paramDictCtfFind['stepdef'] = args.stepdef
+paramDictCtfFind['slow'] = args.slow
+paramDictCtfFind['phaseshift'] = args.phaseshift
+
+paramDictCtfFindLeft = paramDictCtfFind.copy()
+paramDictCtfFindLeft['input'] = paramDictLeft['output']
+paramDictCtfFindLeft['diag'] = strootname + '_diagnostic_output_left.mrc'
+
+ctffind_com = """ `which ctffind` << eof
+%(input)s
+no
+%(diag)s
+%(apix)f
+%(kv)f
+%(cs)f
+%(ac)f
+%(specbox)d
+%(minres)f
+%(maxres)f
+%(mindef)f
+%(maxdef)f
+%(stepdef)f
+no
+%(slow)s
+no
+%(phaseshift)s
+no
+eof\n
+"""
+
+print("Running CTFFIND4 on left-side aligned stack...\n")
+ctffind_left_out = subprocess.run([ctffind_com % paramDictCtfFindLeft], capture_output=True, text=True, shell=True)
+
+paramDictCtfFindRight = paramDictCtfFind.copy()
+paramDictCtfFindRight['input'] = paramDictRight['output']
+paramDictCtfFindRight['diag'] = strootname + '_diagnostic_output_right.mrc'
+
+print("Running CTFFIND4 on right-side aligned stack...\n")
+ctffind_right_out = subprocess.run([ctffind_com % paramDictCtfFindRight], capture_output=True, text=True, shell=True)
+
+print("Let's now analyze the results...")
+tilts = np.loadtxt(args.tlt)
+ctfleft = np.loadtxt(strootname + '_diagnostic_output_left.txt')
+ctfright = np.loadtxt(strootname + '_diagnostic_output_right.txt')
+defleft = 0.5 * ( ctfleft[:,1] + ctfleft[:,2] ) / 10 # Defocus in nm
+defright = 0.5 * ( ctfright[:,1] + ctfright[:,2] ) / 10 # Defocus in nm
+
+# Linear fit using numpy.polyfit
+coefficients_left = np.polyfit(tilts, defleft, 1)
+# print(coefficients_left.shape)
+# print(coefficients_left)
+fit_left = np.poly1d(coefficients_left)
+
+# Linear fit using numpy.polyfit
+coefficients_right = np.polyfit(tilts, defright, 1)
+fit_right = np.poly1d(coefficients_right)
+
+corr_left, _ = pearsonr(defleft, fit_left(tilts))
+corr_right, _ = pearsonr(defright, fit_right(tilts))
+print("\nCorrelation coefficient for left-side fit: %.3f" % corr_left)
+print("Correlation coefficient for right-side fit: %.3f\n" % corr_right)
+
+if corr_left or corr_right <= 0.5:
+    print("\nWARNING! Linear fits are very poor, results are not reliable!!!")
+    print("Try re-running with different options or inspecting your data for possible problems.\n")
+
+plt.plot(tilts, defleft, label="Defocus left-side", color='blue')
+plt.plot(tilts, fit_left(tilts), label="Linear fit left-side", linestyle='--', color='blue')
+plt.plot(tilts, defright, label="Defocus right-side", color='orange')
+plt.plot(tilts, fit_right(tilts), label="Linear fit right-side", linestyle='--', color='orange')
+
+plt.xlabel("Tilt angle [degrees]")
+plt.ylabel("Defocus [nm]")
+plt.legend()
+plt.title("Defocus vs. tilt angle for %s" % args.st)
+
+figname = strootname + "defocusgrad" + ext
+plt.savefig(figname)
+plt.show()
+
+print("Plot saved as %s" % figname )
+
+print("""
+
+HOW TO MAKE SENSE OF THIS PLOT:
+
+You should have now an "X" shaped plot.
+If this is not the case, try adjusting the CTFFIND4 parameters used by the defocusgrad script (type 'defocusgrad --help' to see all options), or inspect your data for possible problems.
+
+The LEFT side of the tilt series (blue) should have DECREASING defocus towards positive tilt angles (i.e., a negative inclination).
+Conversely, the RIGHT side of the tilt series (orange) should have INCREASING defocus towards positive tilt angles (i.e., a positive inclination).
+
+If your data satisfy these conditions, you can import it into RELION-4 with -1 defocus handedness. If you have the opposite trends, you need to use +1 defocus handedness.
+If you are using other software for processing your data, please check the corresponding conventions there.
+
+"""
+)
+
