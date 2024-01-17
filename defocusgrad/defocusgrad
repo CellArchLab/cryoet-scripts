@@ -247,6 +247,22 @@ fit_left = np.poly1d(coefficients_left)
 coefficients_right = np.polyfit(tilts, defright, 1)
 fit_right = np.poly1d(coefficients_right)
 
+print("""
+
+HOW TO MAKE SENSE OF THIS PLOT:
+
+You should have now an "X" shaped plot.
+If this is not the case, try adjusting the CTFFIND4 parameters used by the defocusgrad script (type 'defocusgrad --help' to see all options), or inspect your data for possible problems.
+
+The LEFT side of the tilt series (blue) should have DECREASING defocus towards positive tilt angles (i.e., a negative inclination).
+Conversely, the RIGHT side of the tilt series (orange) should have INCREASING defocus towards positive tilt angles (i.e., a positive inclination).
+
+If your data satisfy these conditions, you can import it into RELION-4 with -1 defocus handedness. If you have the opposite trends, you need to use +1 defocus handedness.
+If you are using other software for processing your data, please check the corresponding conventions there.
+
+"""
+)
+
 corr_left, _ = pearsonr(defleft, fit_left(tilts))
 corr_right, _ = pearsonr(defright, fit_right(tilts))
 print("\nCorrelation coefficient for left-side fit: %.3f" % corr_left)
@@ -268,23 +284,8 @@ plt.title("Defocus vs. tilt angle for %s" % args.st)
 
 figname = strootname + "defocusgrad" + ext
 plt.savefig(figname)
+print("Plot saved as %s" % figname )
 plt.show()
 
-print("Plot saved as %s" % figname )
 
-print("""
-
-HOW TO MAKE SENSE OF THIS PLOT:
-
-You should have now an "X" shaped plot.
-If this is not the case, try adjusting the CTFFIND4 parameters used by the defocusgrad script (type 'defocusgrad --help' to see all options), or inspect your data for possible problems.
-
-The LEFT side of the tilt series (blue) should have DECREASING defocus towards positive tilt angles (i.e., a negative inclination).
-Conversely, the RIGHT side of the tilt series (orange) should have INCREASING defocus towards positive tilt angles (i.e., a positive inclination).
-
-If your data satisfy these conditions, you can import it into RELION-4 with -1 defocus handedness. If you have the opposite trends, you need to use +1 defocus handedness.
-If you are using other software for processing your data, please check the corresponding conventions there.
-
-"""
-)
 
