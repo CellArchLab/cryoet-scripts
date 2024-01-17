@@ -10,7 +10,7 @@ SCRIPTS_HOME="/scicore/home/engel0006/GROUP/pool-engel/soft/isonet/scripts/"
 print_help () {
 
   cat <<fin 
-isonet_pipeline_scicore
+isonet_pipeline
 This script offers a a simple command line interface for running the IsoNet pipeline on the sciCORE cluster.
 Usage:
 
