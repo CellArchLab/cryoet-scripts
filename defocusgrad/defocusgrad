@@ -18,7 +18,9 @@ NOTE: the script expects IMOD and CTFFIND4 to be available in PATH.\n
 
 This is script is based off the implementation from Stefano Scaramuzza and Daniel Castaño-Diez available at https://github.com/LBEM-CH/TomographyTools
                                  
-""")
+""",
+formatter_class=argparse.ArgumentDefaultsHelpFormatter
+)
 
 # Create argument groups
 general_group = parser.add_argument_group('General options')
