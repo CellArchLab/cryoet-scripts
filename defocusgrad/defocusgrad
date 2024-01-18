@@ -284,14 +284,14 @@ defright = 0.5 * ( ctfright[:,1] + ctfright[:,2] ) / 10 # Defocus in nm
 
 args.exclude_positive = -args.exclude_positive if args.exclude_positive > 0 else None
 
-print("\nFull list of tilt angles (%d in total):" % len(tilts))
+print("\nFull list of tilt angles (%d in total):" % tilts.size)
 print(tilts)
 tilts = tilts[args.exclude_negative:args.exclude_positive]
 defleft = defleft[args.exclude_negative:args.exclude_positive]
 defright = defright[args.exclude_negative:args.exclude_positive]
 
 if args.exclude_negative > 0 or args.exclude_positive is None:
-    print("Tilt angles that will be INCLUDED in the analysis (%d in total):" % len(tilts))
+    print("Tilt angles that will be INCLUDED in the analysis (%d in total):" % tilts.size)
     print(tilts)
 
 tilts = tilts.reshape(-1, 1)
@@ -316,12 +316,16 @@ fit_right.fit(tilts.reshape(-1, 1), defright.reshape(-1, 1))
 inliers_left = fit_left.inlier_mask_
 outliers_left = np.logical_not(inliers_left)
 inliers_right = fit_right.inlier_mask_
-outliers_right = np.logical_not(outliers_left)
+outliers_right = np.logical_not(inliers_right)
 
-print("\nTilt angles EXCLUDED by robust fitting on the left side (%d in total):" % len(tilts[outliers_left].squeeze()))
-print(tilts[outliers_left].squeeze())
-print("Tilt angles EXCLUDED by robust fitting on the right side (%d in total):" % len(tilts[outliers_right].squeeze()))
-print(tilts[outliers_right].squeeze())
+# print(outliers_left)
+# print(outliers_left.sum())
+if outliers_left.sum() > 0:
+    print("\nTilt angles EXCLUDED by robust fitting on the left side (%d in total):" % tilts[outliers_left].size)
+    print(tilts[outliers_left])
+if outliers_right.sum() > 0:
+    print("Tilt angles EXCLUDED by robust fitting on the right side (%d in total):" % tilts[outliers_right].size)
+    print(tilts[outliers_right])
 
 print("""
       
@@ -346,10 +350,13 @@ print("Slope for right-side fit: %.3f" % slope_right)
 print("CONCLUSION:")
 if slope_left < 0 and slope_right > 0:
     print("Import into RELION-4 using -1 tilt handedness.")
+    polarity = -1
 elif slope_left > 0 and slope_right < 0:
     print("Import into RELION-4 using +1 tilt handedness.")
+    polarity = +1
 else:
     print("Fits for both sides have the same slope sign, results inconclusive!!!")
+    polarity = 0
     
 
 corr_left, _ = pearsonr(defleft[inliers_left].squeeze(), fit_left.predict(tilts[inliers_left]).squeeze())
@@ -367,15 +374,21 @@ plt.scatter(tilts[inliers_right], defright[inliers_right], label="Defocus right-
 plt.plot(tilts[inliers_right], fit_right.predict(tilts[inliers_right]), label="Linear fit right-side", linestyle='--', color='orange')
 
 if args.show_outliers:
-    plt.scatter(tilts[outliers_left], defleft[outliers_left], label="Outliers left-side", color='blue', alpha=0.25)
-    plt.scatter(tilts[outliers_right], defright[outliers_right], label="Outliers left-side", color='orange', alpha=0.25)
+    if outliers_left.sum() > 0:
+        plt.scatter(tilts[outliers_left], defleft[outliers_left], label="Outliers left-side", color='blue', alpha=0.25)
+    else:
+        print("No outliers were detected on the left side!")
+    if outliers_right.sum() > 0:
+        plt.scatter(tilts[outliers_right], defright[outliers_right], label="Outliers right-side", color='orange', alpha=0.25)
+    else:
+        print("No outliers were detected on the right side!")
 
 plt.xlabel("Tilt angle [degrees]")
 plt.ylabel("Defocus [nm]")
 plt.legend()
-plt.title("Defocus vs. tilt angle for %s" % args.st)
+plt.title("Defocus vs. tilt angle for %s (%d)" % (args.st, polarity))
 
-figname = strootname + "defocusgrad" + ext
+figname = strootname + "_defocusgrad" + ext
 plt.savefig(figname)
 print("Plot saved as %s" % figname )
 
