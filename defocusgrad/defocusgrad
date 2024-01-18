@@ -7,111 +7,145 @@ import mrcfile
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
+from sklearn.linear_model import RANSACRegressor
 
 ext = ".png" # Extension for saving the plots
 
 parser = argparse.ArgumentParser(description="""
                                  
-Calculate and plot defocus handedness for an aligned tilt series.
-NOTE: the script expects IMOD and CTFFIND4 to be available in PATH.
-                                 
+Calculate and plot defocus handedness for an aligned tilt series using robust fitting.\n
+NOTE: the script expects IMOD and CTFFIND4 to be available in PATH.\n
+
 This is script is based off the implementation from Stefano Scaramuzza and Daniel Castaño-Diez available at https://github.com/LBEM-CH/TomographyTools
                                  
 """)
 
-parser.add_argument("--st", 
+# Create argument groups
+general_group = parser.add_argument_group('General options')
+newst_group = parser.add_argument_group('IMOD newstack options')
+ctffind_group = parser.add_argument_group('CTFFIND4 options')
+
+newst_group.add_argument("--st", 
                     type=str, 
                     required=True, 
                     help="Path to input unaligned tilt series stack in MRC format, preferably NOT dose-filtered."
                     )
-parser.add_argument("--xf", 
+newst_group.add_argument("--xf", 
                     type=str, 
                     required=True, 
                     help="Path to IMOD .xf file for aligning the tilt series."
                     )
-parser.add_argument("--tlt", 
+newst_group.add_argument("--tlt", 
                     type=str, 
                     required=True, 
                     help="Path to .tlt file with tilt angles (one per line as in IMOD format)."
                     )
-parser.add_argument("--bin", 
+newst_group.add_argument("--bin", 
                     type=int,
                     default=1, 
                     required=False, 
                     help="Binning factor for aligned left/right stacks."
                     )
-parser.add_argument("--newst_options", 
+newst_group.add_argument("--newst_options", 
                     type=str,
                     default="-antialias 5 -linear -taper 1,0 -origin", 
                     required=False, 
                     help="Additional options to IMOD's newstack program."
                     )
-parser.add_argument("--kV", 
+ctffind_group.add_argument("--kV", 
                     type=float,
                     default=300.0, 
                     required=False, 
                     help="Acceleration voltage in kV."
                     )
-parser.add_argument("--Cs", 
+ctffind_group.add_argument("--Cs", 
                     type=float,
                     default=2.7, 
                     required=False, 
                     help="Spherical aberration in mm."
                     )
-parser.add_argument("--Ac", 
+ctffind_group.add_argument("--Ac", 
                     type=float,
                     default=0.07, 
                     required=False, 
                     help="Amplitude contrast."
                     )
-parser.add_argument("--spectrum_boxsize", 
+ctffind_group.add_argument("--spectrum_boxsize", 
                     type=int,
                     default=512, 
                     required=False, 
                     help="Size of amplitude spectrum to compute in pixels."
                     )
-parser.add_argument("--minres", 
+ctffind_group.add_argument("--minres", 
                     type=float,
                     default=30.0, 
                     required=False, 
                     help="Minimum resolution in Å."
                     )
-parser.add_argument("--maxres", 
+ctffind_group.add_argument("--maxres", 
                     type=float,
                     default=5.0, 
                     required=False, 
                     help="Maximum resolution in Å."
                     )
-parser.add_argument("--mindef", 
+ctffind_group.add_argument("--mindef", 
                     type=float,
                     default=5000.0, 
                     required=False, 
                     help="Minimum defocus in Å."
                     )
-parser.add_argument("--maxdef", 
+ctffind_group.add_argument("--maxdef", 
                     type=float,
                     default=50000.0, 
                     required=False, 
                     help="Maximum defocus in Å."
                     )
-parser.add_argument("--stepdef", 
+ctffind_group.add_argument("--stepdef", 
                     type=float,
                     default=100.0, 
                     required=False, 
                     help="Defocus search step in Å."
                     )
-parser.add_argument("--slow", 
+ctffind_group.add_argument("--slow", 
                     type=str,
                     default="no", 
                     required=False, 
                     help="Slower, more exhaustive search?"
                     )
-parser.add_argument("--phaseshift", 
+ctffind_group.add_argument("--phaseshift", 
                     type=str,
                     default="no", 
                     required=False, 
                     help="Find additional phase shift?"
                     )
+ctffind_group.add_argument("--threads", 
+                    type=int,
+                    default=4, 
+                    required=False, 
+                    help="Number of threads to run CTFFIND in parallel."
+                    )
+general_group.add_argument("--ignore_negative", 
+                    type=int,
+                    default=0, 
+                    required=False, 
+                    help="Number of tilts on the negative side of the tilt series to manually exclude from the analysis."
+                    )
+general_group.add_argument("--exclude_positive", 
+                    type=int,
+                    default=0, 
+                    required=False, 
+                    help="Number of tilts on the positive side of the tilt series to manually exclude from the analysis."
+                    )
+general_group.add_argument("--no_clean",
+                           action="store_true",
+                           required=False,
+                           help="Do NOT delete left and right aligned stacks at the end of the run. Useful for inspecting results in more detail."
+                           )
+general_group.add_argument("--show_outliers",
+                           action="store_true",
+                           required=False,
+                           help="Show outlier points excluded by robust fitting."
+                           )
 
 args = parser.parse_args()
 # If you want to print usage information
@@ -124,7 +158,7 @@ with mrcfile.open(args.st, permissive=True) as mrc:
     apix = mrc.voxel_size.x
 
 print("\nPixel size of %s is %.3f Å" % (args.st, apix))
-print("If this is not correct, you have to adjust the MRC file header!\n")
+print("If this is wrong, you have to adjust the MRC file header!")
 
 # Get rootname of aligned stack:
 stfilename = os.path.basename(args.st)
@@ -146,15 +180,16 @@ paramDictLeft['outsize_x'] = stdim[0]//paramDictLeft['bin']//2
 paramDictLeft['outsize_y'] = stdim[1]//paramDictLeft['bin'] 
 paramDictLeft['extraopts'] = args.newst_options
 
-newst_left_com = "`which newstack` -in %(input)s "
-newst_left_com += "-ou  %(output)s " 
+newst_left_com = "newstack -in %(input)s "
+newst_left_com += "-ou %(output)s " 
 newst_left_com += "-xform %(xform)s " 
 newst_left_com += "-offset %(offset_x)d,%(offset_y)d " 
 newst_left_com += "-bin %(bin)d "
 newst_left_com += "-size %(outsize_x)d,%(outsize_y)d "
 newst_left_com += "%(extraopts)s"
 
-print("Generating left-side aligned stack...\n")
+print("\nGenerating left-side aligned stack:\n")
+print(newst_left_com % paramDictLeft)
 newst_left_out = subprocess.run([newst_left_com % paramDictLeft], capture_output=True, text=True, shell=True)
 
 paramDictRight = {}
@@ -168,15 +203,16 @@ paramDictRight['outsize_x'] = stdim[0]//paramDictRight['bin']//2
 paramDictRight['outsize_y'] = stdim[1]//paramDictRight['bin'] 
 paramDictRight['extraopts'] = args.newst_options
 
-newst_right_com = "`which newstack` -in %(input)s "
-newst_right_com += "-ou  %(output)s " 
+newst_right_com = "newstack -in %(input)s "
+newst_right_com += "-ou %(output)s " 
 newst_right_com += "-xform %(xform)s " 
 newst_right_com += "-offset %(offset_x)d,%(offset_y)d " 
 newst_right_com += "-bin %(bin)d "
 newst_right_com += "-size %(outsize_x)d,%(outsize_y)d "
 newst_right_com += "%(extraopts)s"
 
-print("Generating right-side aligned stack...\n")
+print("\nGenerating right-side aligned stack:\n")
+print(newst_right_com % paramDictRight)
 newst_right_out = subprocess.run([newst_right_com % paramDictRight], capture_output=True, text=True, shell=True)
 
 paramDictCtfFind = {}
@@ -198,7 +234,7 @@ paramDictCtfFindLeft = paramDictCtfFind.copy()
 paramDictCtfFindLeft['input'] = paramDictLeft['output']
 paramDictCtfFindLeft['diag'] = strootname + '_diagnostic_output_left.mrc'
 
-ctffind_com = """ `which ctffind` << eof
+ctffind_com = """ctffind << eof
 %(input)s
 no
 %(diag)s
@@ -217,65 +253,113 @@ no
 no
 %(phaseshift)s
 no
-eof\n
+eof
 """
 
-print("Running CTFFIND4 on left-side aligned stack...\n")
-ctffind_left_out = subprocess.run([ctffind_com % paramDictCtfFindLeft], capture_output=True, text=True, shell=True)
+print("\nRunning CTFFIND4 on left-side aligned stack:\n")
+print("OMP_NUM_THREADS=%d " % args.threads + ctffind_com % paramDictCtfFindLeft)
+ctffind_left_out = subprocess.run(["OMP_NUM_THREADS=%d " % args.threads + ctffind_com % paramDictCtfFindLeft], capture_output=True, text=True, shell=True)
 
 paramDictCtfFindRight = paramDictCtfFind.copy()
 paramDictCtfFindRight['input'] = paramDictRight['output']
 paramDictCtfFindRight['diag'] = strootname + '_diagnostic_output_right.mrc'
 
-print("Running CTFFIND4 on right-side aligned stack...\n")
-ctffind_right_out = subprocess.run([ctffind_com % paramDictCtfFindRight], capture_output=True, text=True, shell=True)
+print("\nRunning CTFFIND4 on right-side aligned stack:\n")
+print("OMP_NUM_THREADS=%d " % args.threads + ctffind_com % paramDictCtfFindRight)
+ctffind_right_out = subprocess.run(["OMP_NUM_THREADS=%d " % args.threads + ctffind_com % paramDictCtfFindRight], capture_output=True, text=True, shell=True)
 
-print("Let's now analyze the results...")
+print("\nLet's now analyze the results...")
 tilts = np.loadtxt(args.tlt)
 ctfleft = np.loadtxt(strootname + '_diagnostic_output_left.txt')
 ctfright = np.loadtxt(strootname + '_diagnostic_output_right.txt')
 defleft = 0.5 * ( ctfleft[:,1] + ctfleft[:,2] ) / 10 # Defocus in nm
 defright = 0.5 * ( ctfright[:,1] + ctfright[:,2] ) / 10 # Defocus in nm
 
-# Linear fit using numpy.polyfit
-coefficients_left = np.polyfit(tilts, defleft, 1)
-# print(coefficients_left.shape)
-# print(coefficients_left)
-fit_left = np.poly1d(coefficients_left)
+args.ignore_positive = -args.ignore_positive if args.ignore_positive > 0 else None
 
-# Linear fit using numpy.polyfit
-coefficients_right = np.polyfit(tilts, defright, 1)
-fit_right = np.poly1d(coefficients_right)
+print("\nFull list of tilt angles (%d in total):" % len(tilts))
+print(tilts)
+tilts = tilts[args.ignore_negative:args.ignore_positive]
+defleft = defleft[args.ignore_negative:args.ignore_positive]
+defright = defright[args.ignore_negative:args.ignore_positive]
+print("Tilt angles that will be INCLUDED in the analysis (%d in total):" % len(tilts))
+print(tilts)
+
+tilts = tilts.reshape(-1, 1)
+defleft = defleft.reshape(-1, 1)
+defright = defright.reshape(-1, 1)
+
+# # Linear fit using numpy.polyfit
+# coefficients_left = np.polyfit(tilts, defleft, 1)
+# fit_left = np.poly1d(coefficients_left)
+
+# # Linear fit using numpy.polyfit
+# coefficients_right = np.polyfit(tilts, defright, 1)
+# fit_right = np.poly1d(coefficients_right)
+
+# Robust linear fit using RANSAC:
+fit_left = RANSACRegressor()
+fit_left.fit(tilts.reshape(-1, 1), defleft.reshape(-1, 1))
+
+fit_right = RANSACRegressor()
+fit_right.fit(tilts.reshape(-1, 1), defright.reshape(-1, 1))
+
+inliers_left = fit_left.inlier_mask_
+outliers_left = np.logical_not(inliers_left)
+inliers_right = fit_right.inlier_mask_
+outliers_right = np.logical_not(outliers_left)
+
+print("\nTilt angles EXCLUDED by robust fitting on the left side (%d in total):" % len(tilts[outliers_left].squeeze()))
+print(tilts[outliers_left].squeeze())
+print("Tilt angles EXCLUDED by robust fitting on the right side (%d in total):" % len(tilts[outliers_left].squeeze()))
+print(tilts[outliers_right].squeeze())
 
 print("""
-
+      
 HOW TO MAKE SENSE OF THIS PLOT:
 
-You should have now an "X" shaped plot.
-If this is not the case, try adjusting the CTFFIND4 parameters used by the defocusgrad script (type 'defocusgrad --help' to see all options), or inspect your data for possible problems.
+You should have now an "X" shaped plot. If this is not the case, try adjusting the CTFFIND4 parameters used by the defocusgrad script (type 'defocusgrad --help' to see all options), or inspect your data for possible problems.
+NOTE: not all points may be shown because outliers are automatically excluded by robust fitting with RANSAC.
 
-The LEFT side of the tilt series (blue) should have DECREASING defocus towards positive tilt angles (i.e., a negative inclination).
-Conversely, the RIGHT side of the tilt series (orange) should have INCREASING defocus towards positive tilt angles (i.e., a positive inclination).
+The LEFT side of the tilt series (blue) should have DECREASING defocus towards positive tilt angles (i.e., a negative slope).
+Conversely, the RIGHT side of the tilt series (orange) should have INCREASING defocus towards positive tilt angles (i.e., a positive slope).
 
-If your data satisfy these conditions, you can import it into RELION-4 with -1 defocus handedness. If you have the opposite trends, you need to use +1 defocus handedness.
+If your data satisfy these conditions, you can import it into RELION-4 with -1 defocus handedness. If you have the opposite trend, you need to use +1 defocus handedness.
 If you are using other software for processing your data, please check the corresponding conventions there.
-
 """
 )
 
-corr_left, _ = pearsonr(defleft, fit_left(tilts))
-corr_right, _ = pearsonr(defright, fit_right(tilts))
+slope_left = fit_left.estimator_.coef_[0]
+slope_right = fit_right.estimator_.coef_[0]
+
+print("\nSlope for left-side fit: %.3f" % slope_left)
+print("Slope for right-side fit: %.3f" % slope_right)
+
+if slope_left < 0 and slope_right > 0:
+    print("Import into RELION-4 using -1 tilt handedness.")
+elif slope_left > 0 and slope_right < 0:
+    print("Import into RELION-4 using +1 tilt handedness.")
+else:
+    print("Fits for both sides have the same slope sign, results inconclusive!!!")
+    
+
+corr_left, _ = pearsonr(defleft[inliers_left].squeeze(), fit_left.predict(tilts[inliers_left]).squeeze())
+corr_right, _ = pearsonr(defright[inliers_right].squeeze(), fit_right.predict(tilts[inliers_right]).squeeze())
 print("\nCorrelation coefficient for left-side fit: %.3f" % corr_left)
 print("Correlation coefficient for right-side fit: %.3f\n" % corr_right)
 
-if corr_left or corr_right <= 0.5:
+if corr_left <= 0.5 or corr_right <= 0.5:
     print("\nWARNING! Linear fits are very poor, results are not reliable!!!")
     print("Try re-running with different options or inspecting your data for possible problems.\n")
 
-plt.plot(tilts, defleft, label="Defocus left-side", color='blue')
-plt.plot(tilts, fit_left(tilts), label="Linear fit left-side", linestyle='--', color='blue')
-plt.plot(tilts, defright, label="Defocus right-side", color='orange')
-plt.plot(tilts, fit_right(tilts), label="Linear fit right-side", linestyle='--', color='orange')
+plt.scatter(tilts[inliers_left], defleft[inliers_left], label="Defocus left-side", color='blue')
+plt.plot(tilts[inliers_left], fit_left.predict(tilts[inliers_left]), label="Linear fit left-side", linestyle='--', color='blue')
+plt.scatter(tilts[inliers_right], defright[inliers_right], label="Defocus right-side", color='orange')
+plt.plot(tilts[inliers_right], fit_right.predict(tilts[inliers_right]), label="Linear fit right-side", linestyle='--', color='orange')
+
+if args.show_outliers:
+    plt.scatter(tilts[outliers_left], defleft[outliers_left], label="Outliers left-side", color='blue', alpha=0.25)
+    plt.scatter(tilts[outliers_right], defright[outliers_right], label="Outliers left-side", color='orange', alpha=0.25)
 
 plt.xlabel("Tilt angle [degrees]")
 plt.ylabel("Defocus [nm]")
@@ -285,7 +369,10 @@ plt.title("Defocus vs. tilt angle for %s" % args.st)
 figname = strootname + "defocusgrad" + ext
 plt.savefig(figname)
 print("Plot saved as %s" % figname )
+
 plt.show()
 
+if not args.no_clean:
 
-
+    os.remove(paramDictLeft['output'])
+    os.remove(paramDictRight['output'])
