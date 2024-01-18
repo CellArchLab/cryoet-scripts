@@ -288,7 +288,6 @@ tilts = tilts[args.exclude_negative:args.exclude_positive]
 defleft = defleft[args.exclude_negative:args.exclude_positive]
 defright = defright[args.exclude_negative:args.exclude_positive]
 
-print(args.exclude_negative, args.exclude_positive)
 if args.exclude_negative > 0 or args.exclude_positive is None:
     print("Tilt angles that will be INCLUDED in the analysis (%d in total):" % len(tilts))
     print(tilts)
