@@ -124,7 +124,7 @@ ctffind_group.add_argument("--threads",
                     required=False, 
                     help="Number of threads to run CTFFIND in parallel."
                     )
-general_group.add_argument("--ignore_negative", 
+general_group.add_argument("--exclude_negative", 
                     type=int,
                     default=0, 
                     required=False, 
@@ -137,18 +137,19 @@ general_group.add_argument("--exclude_positive",
                     help="Number of tilts on the positive side of the tilt series to manually exclude from the analysis."
                     )
 general_group.add_argument("--no_clean",
-                           action="store_true",
-                           required=False,
-                           help="Do NOT delete left and right aligned stacks at the end of the run. Useful for inspecting results in more detail."
-                           )
+                    action="store_true",
+                    required=False,
+                    help="Do NOT delete left and right aligned stacks at the end of the run. Useful for inspecting results in more detail."
+                    )
 general_group.add_argument("--show_outliers",
-                           action="store_true",
-                           required=False,
-                           help="Show outlier points excluded by robust fitting."
-                           )
+                    action="store_true",
+                    required=False,
+                    help="Show outlier points excluded by robust fitting."
+                    )
 
 args = parser.parse_args()
-# If you want to print usage information
+
+# Print usage information
 if not args.st:
     parser.print_help()
 
@@ -256,17 +257,21 @@ no
 eof
 """
 
+# Set the OMP_NUM_THREADS environment variable
+env = os.environ.copy()
+env['OMP_NUM_THREADS'] = str(args.threads)
+
 print("\nRunning CTFFIND4 on left-side aligned stack:\n")
-print("OMP_NUM_THREADS=%d " % args.threads + ctffind_com % paramDictCtfFindLeft)
-ctffind_left_out = subprocess.run(["OMP_NUM_THREADS=%d " % args.threads + ctffind_com % paramDictCtfFindLeft], capture_output=True, text=True, shell=True)
+print(ctffind_com % paramDictCtfFindLeft)
+ctffind_left_out = subprocess.run([ctffind_com % paramDictCtfFindLeft], capture_output=True, text=True, shell=True, env=env)
 
 paramDictCtfFindRight = paramDictCtfFind.copy()
 paramDictCtfFindRight['input'] = paramDictRight['output']
 paramDictCtfFindRight['diag'] = strootname + '_diagnostic_output_right.mrc'
 
 print("\nRunning CTFFIND4 on right-side aligned stack:\n")
-print("OMP_NUM_THREADS=%d " % args.threads + ctffind_com % paramDictCtfFindRight)
-ctffind_right_out = subprocess.run(["OMP_NUM_THREADS=%d " % args.threads + ctffind_com % paramDictCtfFindRight], capture_output=True, text=True, shell=True)
+print(ctffind_com % paramDictCtfFindRight)
+ctffind_right_out = subprocess.run([ctffind_com % paramDictCtfFindRight], capture_output=True, text=True, shell=True, env=env)
 
 print("\nLet's now analyze the results...")
 tilts = np.loadtxt(args.tlt)
@@ -275,15 +280,18 @@ ctfright = np.loadtxt(strootname + '_diagnostic_output_right.txt')
 defleft = 0.5 * ( ctfleft[:,1] + ctfleft[:,2] ) / 10 # Defocus in nm
 defright = 0.5 * ( ctfright[:,1] + ctfright[:,2] ) / 10 # Defocus in nm
 
-args.ignore_positive = -args.ignore_positive if args.ignore_positive > 0 else None
+args.exclude_positive = -args.exclude_positive if args.exclude_positive > 0 else None
 
 print("\nFull list of tilt angles (%d in total):" % len(tilts))
 print(tilts)
-tilts = tilts[args.ignore_negative:args.ignore_positive]
-defleft = defleft[args.ignore_negative:args.ignore_positive]
-defright = defright[args.ignore_negative:args.ignore_positive]
-print("Tilt angles that will be INCLUDED in the analysis (%d in total):" % len(tilts))
-print(tilts)
+tilts = tilts[args.exclude_negative:args.exclude_positive]
+defleft = defleft[args.exclude_negative:args.exclude_positive]
+defright = defright[args.exclude_negative:args.exclude_positive]
+
+print(args.exclude_negative, args.exclude_positive)
+if args.exclude_negative > 0 or args.exclude_positive is None:
+    print("Tilt angles that will be INCLUDED in the analysis (%d in total):" % len(tilts))
+    print(tilts)
 
 tilts = tilts.reshape(-1, 1)
 defleft = defleft.reshape(-1, 1)
@@ -311,7 +319,7 @@ outliers_right = np.logical_not(outliers_left)
 
 print("\nTilt angles EXCLUDED by robust fitting on the left side (%d in total):" % len(tilts[outliers_left].squeeze()))
 print(tilts[outliers_left].squeeze())
-print("Tilt angles EXCLUDED by robust fitting on the right side (%d in total):" % len(tilts[outliers_left].squeeze()))
+print("Tilt angles EXCLUDED by robust fitting on the right side (%d in total):" % len(tilts[outliers_right].squeeze()))
 print(tilts[outliers_right].squeeze())
 
 print("""
@@ -334,7 +342,7 @@ slope_right = fit_right.estimator_.coef_[0]
 
 print("\nSlope for left-side fit: %.3f" % slope_left)
 print("Slope for right-side fit: %.3f" % slope_right)
-
+print("CONCLUSION:")
 if slope_left < 0 and slope_right > 0:
     print("Import into RELION-4 using -1 tilt handedness.")
 elif slope_left > 0 and slope_right < 0:
@@ -349,7 +357,7 @@ print("\nCorrelation coefficient for left-side fit: %.3f" % corr_left)
 print("Correlation coefficient for right-side fit: %.3f\n" % corr_right)
 
 if corr_left <= 0.5 or corr_right <= 0.5:
-    print("\nWARNING! Linear fits are very poor, results are not reliable!!!")
+    print("WARNING! Linear fits are very poor, results are not reliable!!!")
     print("Try re-running with different options or inspecting your data for possible problems.\n")
 
 plt.scatter(tilts[inliers_left], defleft[inliers_left], label="Defocus left-side", color='blue')

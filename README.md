@@ -7,6 +7,16 @@ Currently the following scritps are available:
   - Dependencies:
     - [cryoCARE_pip](https://github.com/juglab/cryoCARE_pip)
     - [IMOD](https://bio3d.colorado.edu/imod/)
+* `defocusgrad/defocusgrad`
+  - Dependencies:
+    - Python 3.x and the following modules:
+      - mrcfile
+      - numpy
+      - matplotlib
+      - scipy
+      - scikit-learn
+    - [IMOD](https://bio3d.colorado.edu/imod/)
+    - [CTFFIND4](https://grigoriefflab.umassmed.edu/ctffind4)
 * `isonet/isonet_pipeline`
   - Dependencies:
     - [IsoNet](https://github.com/IsoNet-cryoET/IsoNet)
