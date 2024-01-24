@@ -532,7 +532,7 @@ fin
     if [[ $bytes == "n" ]]; then
       echo "cp -r \$TMPDIR/denoised/`basename ${eventomos[${n}]}` ${outputs[n]}" >> submit_cryocare_$$.sh
     else
-      echo "densmatch -s $t -target 127,10 -all -mode 0 -output $t" >> submit_cryocare_$$.sh
+      echo "densmatch -s \$TMPDIR/denoised/`basename ${eventomos[${n}]}` -target 127,10 -all -mode 0 -output ${outputs[n]}" >> submit_cryocare_$$.sh
     fi
     # And then go back to $TMPDIR to predict the next tomogram
     echo "cd \$TMPDIR" >> submit_cryocare_$$.sh
