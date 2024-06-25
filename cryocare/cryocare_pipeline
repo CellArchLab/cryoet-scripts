@@ -1,6 +1,6 @@
 #!/bin/bash
 
-module purge
+# module purge
 # module load cryoCARE
 
 print_help () {
@@ -32,10 +32,10 @@ Options:
 --nfirst, -nf:         number of initial feature channels in the network architecture. Default: 32
 --skiptraining:        whether to skip the training (i.e. predict only) or not. Default: n
 --skipprediction:      whether to skip prediction (i.e. train only) or not. Default: n
---bytes                convert predicted tomograms to bytes (MRC mode 0, with mean 127 and standard deviation of 10) to save space. IMOD needs to be available. Default: y
+--bytes                convert predicted tomograms to bytes (MRC mode 0, with mean 127 and standard deviation of 10) to save space. IMOD needs to be available. Default: n
 --subcmd               Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
---partition, -p:       SLURM partition where to run the job: a100, rtx8000 or pascal. Default: a100
---qos, q:              SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are gpu6hours, gpu1day, gpu1week, 30min, 6hours, 1day, 1week, 2weeks, infinite. Default: gpu6hours
+--partition, -p:         SLURM partition where to run the job. For sciCORE these are scicore-gpu (generic), rtx4090 or a100. Default: scicore-gpu
+--qos, q:                SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are gpu30min, gpu6hours, gpu1day, gpu1week. Default: gpu6hours
 --help, -h:            print this message.
 
 fin
@@ -58,11 +58,11 @@ batch=32
 nfirst=32
 skiptraining=n
 skipprediction=n
-partition=a100
+partition=scicore-gpu
 qos=gpu6hours
 subcmd=sbatch
 bin=0
-bytes=y
+bytes=n
 
 
 # Parse arguments:
@@ -346,6 +346,12 @@ fin
 
 if [[ "$skiptraining" == "n" ]]; then
   case $partition in
+    scicore-gpu)
+    ngpu=4
+    ;;
+    rtx4090)
+    ngpu=8
+    ;;
     a100)
     ngpu=4
     ;;
@@ -395,7 +401,7 @@ fin
 
 if [[ ! "$recdir" == "" ]] || [[ "$bytes" == "y" ]]; then 
 
-  echo "module load IMOD/4.11.23_RHEL7-64_CUDA10.1" >> submit_cryocare_$$.sh
+  echo "module load IMOD" >> submit_cryocare_$$.sh
 
 fi
 
@@ -434,29 +440,29 @@ fin
 
 if [[ $skiptraining == "n" ]]; then
 
-  cat >train_data_config.json <<fin
+  cat >train_data_config_$$.json <<fin
 {
   "even": [
 fin
   for i in "${eventomos[@]}"; do
     if [[ "$i" == "${eventomos[-1]}" ]]; then
-      echo "\"`basename "${i}"`\"" >> train_data_config.json
+      echo "\"`basename "${i}"`\"" >> train_data_config_$$.json
     else
-      echo "\"`basename "${i}"`\"," >> train_data_config.json
+      echo "\"`basename "${i}"`\"," >> train_data_config_$$.json
     fi
   done
-  cat >>train_data_config.json <<fin
+  cat >>train_data_config_$$.json <<fin
   ],
   "odd": [
 fin
   for i in "${oddtomos[@]}"; do
     if [[ "$i" == "${oddtomos[-1]}" ]]; then
-      echo "\"`basename "${i}"`\"" >> train_data_config.json
+      echo "\"`basename "${i}"`\"" >> train_data_config_$$.json
     else
-      echo "\"`basename "${i}"`\"," >> train_data_config.json
+      echo "\"`basename "${i}"`\"," >> train_data_config_$$.json
     fi
   done
-  cat >>train_data_config.json <<fin
+  cat >>train_data_config_$$.json <<fin
   ],
   "patch_shape": [
     $boxsize,
@@ -475,12 +481,12 @@ fin
 echo "" >> submit_cryocare_$$.sh
 echo "cd \$TMPDIR" >> submit_cryocare_$$.sh
 echo "" >> submit_cryocare_$$.sh
-echo "time cryoCARE_extract_train_data.py --conf \$OLDPWD/train_data_config.json" >> submit_cryocare_$$.sh
+echo "time cryoCARE_extract_train_data.py --conf \$OLDPWD/train_data_config_$$.json" >> submit_cryocare_$$.sh
 echo "" >> submit_cryocare_$$.sh
 echo "cp train_data.npz val_data.npz \$OLDPWD" >> submit_cryocare_$$.sh
 echo "" >> submit_cryocare_$$.sh
 
-  cat >train_config.json <<fin
+  cat >train_config_$$.json <<fin
 {
   "train_data": "./",
   "epochs": $epochs,
@@ -494,7 +500,7 @@ echo "" >> submit_cryocare_$$.sh
   "path": "./"
 }
 fin
-echo "time cryoCARE_train.py --conf \$OLDPWD/train_config.json" >> submit_cryocare_$$.sh
+echo "time cryoCARE_train.py --conf \$OLDPWD/train_config_$$.json" >> submit_cryocare_$$.sh
 echo "" >> submit_cryocare_$$.sh
 # echo "cp ${modelname}.tar.gz \$OLDPWD" >> submit_cryocare_$$.sh
 echo "" >> submit_cryocare_$$.sh
