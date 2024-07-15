@@ -1,0 +1,545 @@
+#!/bin/bash
+
+print_help () {
+
+cat <<fin
+ddw_pipeline
+This script offers a a simple command line interface for running the CRYO-CARE pipeline on the sciCORE cluster.
+Example usage:
+
+ddw_pipeline --even <even tomograms> --odd <odd tomograms> --out_dir <directory where to store project files> [--boxsize <box size in pixels>] [--mw_angle <angle formed by the missing wedge>] [--splitval <fraction of subtomograms to use for validation>] [--epochs <number of training epochs>] [--batch <number of subtomograms per batch>] [--skiptraining <y/n>] [--partition <SLURM partition where to run the job>] [--qos <SLURM QOS to run the job>]
+
+Note: the order of the parameters does not matter. Parameters in brackets are optional.
+Options:
+--even:                one or more tomogram reconstructions from even frames in MRC file format
+--odd:                 one or more tomogram reconstruction(s) from odd frames in MRC file format. If providing multiple files, they must be in the same order as the even tomograms.
+--evenstack:           one or more tilt series from even frames in MRC file format. Only used if option --recdir is set.
+--oddstack:            one or more tilt series from odd frames in MRC file format. Only used if option --recdir is set.
+--recdir:              one or more IMOD reconstruction directories where odd/even tomograms from the tilt series given with the options --evenstack and --oddstack will be generated. This directory needs to contain newst.com and tilt.com files to work.
+--bin:                 override binning level for odd/even tomogram reconstructions with this value. Only used if option --recdir is set. Default: 0 (no override)
+--mask, m:             binary mask defining where to extract subtomograms from. The same mask will be used for all tomograms.                
+--out_dir:             output directory to store project files
+--ckpt:                name of model checkpoint to be used for prediction, without extension.
+--boxsize, -b:         box size in pixels. Default: 80
+--zstride, -z:         z interval to sample subtomograms, in pixels. Default: 80
+--split_val, -sp:      fraction of subtomograms to use for validation. Default: 0.1
+--mw_angle, -mw:       width of the missing wedge in degrees. Default: 70 (corresponding to an acquisition between +/- 55 degrees)
+--depth, -d:           Depth of the neural network (number of layers). Default: 3
+--nfirst, -nf:         number of initial feature channels in the network architecture. Default: 32
+--epochs, -e:          number of training epochs. Default: 1000
+--batch, -st:          number of subtomograms per batch. Default: 5
+--nworkers:            number of data loading workers. Default: 10
+--drop_prob:           dropout probability to prevent overfitting, between 0.0 (disabled) and 1.0 (completely random). Default: 0.0
+--seed:                random seed. Default: 42
+--skiptraining:        whether to skip the training (i.e. predict only) or not. Default: n
+--skipprediction:      whether to skip prediction (i.e. train only) or not. Default: n
+--bytes                convert predicted tomograms to bytes (MRC mode 0, with mean 127 and standard deviation of 10) to save space. IMOD needs to be available. Default: n
+--subcmd               Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
+--gpu                  Which GPU device to use. Only 1 GPU is supported. Default: 0
+--partition, -p:         SLURM partition where to run the job. For sciCORE these are rtx4090 or a100. Default: rtx4090
+--qos, q:                SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are gpu30min, gpu6hours, gpu1day, gpu1week. Default: gpu1day
+--help, -h:            print this message.
+
+fin
+
+}
+
+if [[ $# == 0 ]]; then
+  print_help
+  exit 0
+fi
+
+# Default values:
+boxsize=80
+zstride=80
+splitval=0.1
+mw=70.0
+epochs=1000
+batch=5
+nfirst=32
+depth=3
+nworkers=10
+drop_prob=0.0
+seed=42
+skiptraining=n
+skipprediction=n
+partition=rtx4090
+qos=gpu1day
+subcmd=sbatch
+bin=0
+bytes=n
+gpu=0
+
+# Parse arguments:
+POSITIONAL_ARGS=()
+eventomos=()
+oddtomos=()
+evenstacks=()
+oddstacks=()
+recdirs=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --even)
+      # eventomo="$2"
+      # shift # past argument
+      # shift # past value
+      while (( "$#" >= 2 )) && ! [[ $2 = -* ]]; do
+        eventomos+=( "$2" )
+        shift
+      done
+      ;;
+    --odd)
+      # oddtomo="$2"
+      # shift # past argument
+      # shift # past value
+      while (( "$#" >= 2 )) && ! [[ $2 = -* ]]; do
+        oddtomos+=( "$2" )
+        shift
+      done
+      ;;
+    --evenstack)
+      while (( "$#" >= 2 )) && ! [[ $2 = -* ]]; do
+        evenstacks+=( "$2" )
+        shift
+      done
+      ;;
+    --oddstack)
+      while (( "$#" >= 2 )) && ! [[ $2 = -* ]]; do
+        oddstacks+=( "$2" )
+        shift
+      done
+      ;;
+    --recdir)
+      while (( "$#" >= 2 )) && ! [[ $2 = -* ]]; do
+        recdirs+=( "$2" )
+        shift
+      done
+      ;;
+    --out_dir)
+      out_dir="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --bin)
+      bin="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --mask)
+      mask="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --nworkers)
+      nworkers="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --seed)
+      seed="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --boxsize|-b)
+      boxsize="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --zstride|-z)
+      zstride="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --mw_angle|-mw)
+      mw="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --depth|-d)
+      depth="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --epochs|-e)
+      epochs="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --splitval|-sp)
+      splitval="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --batch)
+      batch="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --nfirst|-nf)
+      nfirst="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --drop_prob)
+      drop_prob="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --ckpt)
+      ckpt="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --out)
+      output="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --skiptraining)
+      skiptraining="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --skipprediction)
+      skipprediction="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --bytes)
+      bytes="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --partition|-p)
+      partition="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --qos|-q)
+      qos="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --gpu)
+      gpu="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --subcmd)
+      subcmd="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --help|-h)
+      print_help
+      exit 0
+      ;;
+    -*|--*)
+      echo "Unknown option $1"
+      exit 1
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1") # save positional arg
+      shift # past argument
+      ;;
+  esac
+done
+
+# set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
+
+if [[ ! "$recdirs" == "" ]]; then
+
+    cat <<fin
+
+Will first reconstruct odd/even tomograms with following inputs:
+
+evenstacks = ${evenstacks[@]}
+oddstacks = ${oddstacks[@]}
+recdirs = ${recdirs[@]}
+
+Then will run DeepDeWedge with following inputs:
+
+fin
+
+  # Get the length of the array
+  num_tomos=${#recdirs[@]}
+
+  # Iterate over the indices of the array
+  for ((i=0; i<$num_tomos; i++)); do
+
+    recdir=${recdirs[$i]}
+    evenstack=${evenstacks[$i]}
+    oddstack=${oddstacks[$i]}
+
+    cd "$recdir"
+
+    cp newst.com newst_even.com
+    cp newst.com newst_odd.com
+    cp tilt.com tilt_even.com
+    cp tilt.com tilt_odd.com
+
+  # Include the desired binning level:
+  if [[ ${bin} > 0 ]]; then
+
+    sed -i 's/BinByFactor.*/BinByFactor '$bin'/g' newst_even.com
+    sed -i 's/BinByFactor.*/BinByFactor '$bin'/g' newst_odd.com
+
+    sed -i 's/IMAGEBINNED.*/IMAGEBINNED '$bin'/g' tilt_even.com
+    sed -i 's/IMAGEBINNED.*/IMAGEBINNED '$bin'/g' tilt_odd.com
+
+  fi
+
+  # Add the SuperSampleFactor parameter to tilt.com if not already present:
+  grep SuperSampleFactor tilt.com
+  if [[ $? == 1 ]]; then
+
+    sed -i '/^$if.*/i SuperSampleFactor 2' tilt_even.com 
+    sed -i '/^$if.*/i SuperSampleFactor 2' tilt_odd.com 
+
+  fi
+
+    evenstack=basename $evenstack
+    oddstack=basename $oddstack
+
+    instack=grep InputFile newst_even.com | awk '{print $2}'
+    instack=basename $instack
+    outstack=grep OutputFile newst_even.com | awk '{print $2}'
+    outstack=basename $outstack
+    outstackeven="${outstack%.*}_EVN.mrc"
+    outstackodd="${outstack%.*}_ODD.mrc"
+    sed -i "s|$instack|$evenstack|g" newst_even.com
+    sed -i "s|$outstack|$outstackeven|g" newst_even.com
+    sed -i "s|$instack|$oddstack|g" newst_odd.com
+    sed -i "s|$outstack|$outstackodd|g" newst_odd.com
+
+    outrecorg=grep OutputFile tilt_even.com | awk '{print $2}'
+    outrec=basename $outrecorg
+    outreceven="${outrec%.*}_EVN.mrc"
+    outrecodd="${outrec%.*}_ODD.mrc"
+    sed -i "s|$outstack|$outstackeven|g" tilt_even.com
+    sed -i "s|$outrecorg|$outreceven|g" tilt_even.com
+    sed -i "s|$outstack|$outstackodd|g" tilt_odd.com
+    sed -i "s|$outrecorg|$outrecodd|g" tilt_odd.com
+
+    eventomos+=( readlink -f "$outreceven" )
+    oddtomos+=( readlink -f "$outrecodd" )
+
+    cd $OLDPWD
+
+  done
+fi
+
+if [[ "$eventomos" == "" ]]; then
+  echo "Please provide the even tomogram file name(s)."
+  exit 1
+fi 
+if [[ "$oddtomos" == "" ]]; then
+  echo "Please provide the even tomogram file name(s)."
+  exit 1
+fi 
+if [[ "$out_dir" == "" ]]; then
+  echo "Please provide the output directory."
+  exit 1
+fi 
+if [[ "$skiptraining" == "y" ]]; then
+    if [[ "$ckpt" == "" ]]; then
+        echo "Please provide the model checkpoint for prediction."
+        exit 1
+    fi
+fi
+
+cat <<fin
+depth = $depth
+boxsize = $boxsize
+zstride = $zstride
+splitval = $splitval
+epochs = $epochs
+batch = $batch
+nfirst = $nfirst
+nworkers = $nworkers
+drop_prob = $drop_prob
+seed = $seed
+qos = $qos
+ckpt = "$ckpt"
+mask = "$mask"
+out_dir = "$out_dir"
+eventomos = ${eventomos[@]}
+oddtomos = ${oddtomos[@]}
+outputs = ${outputs[@]}
+skiptraining = $skiptraining
+skipprediction = $skipprediction
+gpu = $gpu
+subcmd = $subcmd
+partition = $partition
+qos = $qos
+fin
+
+ngpu=1
+
+cat > submit_ddw_$$.sh <<fin
+#!/bin/bash
+# Standard output and error:
+#SBATCH -o ddw.out%j
+# Initial working directory:
+#SBATCH -D ./
+# Job Name:
+#SBATCH -J ddw
+# Queue (Partition):
+#SBATCH --partition=${partition} 
+# Number of nodes and MPI tasks per node:
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=${nworkers}
+#SBATCH --gres=gpu:${ngpu}
+#
+#SBATCH --mail-type=none
+#SBATCH --mem 128G
+#
+# Wall clock limit:
+#SBATCH --qos=${qos}
+
+module purge
+module load DeepDeWedge
+fin
+
+if [[ ! "$recdir" == "" ]] || [[ "$bytes" == "y" ]]; then 
+
+  echo "module load IMOD" >> submit_ddw_$$.sh
+
+fi
+
+if [[ ! "$recdir" == "" ]]; then
+
+  cat >> submit_ddw_$$.sh <<fin
+
+echo "Reconstructing odd/even tomograms from stacks..."
+
+cd $recdir
+
+submfg newst_even.com
+submfg newst_odd.com
+submfg tilt_even.com
+submfg tilt_odd.com
+clip rotx $eventomos $eventomos
+clip rotx $oddtomos $oddtomos
+rm $oddtomos~ $eventomos~
+
+cd \$OLDPWD
+echo "Done reconstructing!"
+
+fin
+
+fi
+
+# out_dir_org=$(readlink -f $out_dir) # Save the full path to the original out_dir given by the user
+# out_dir=$(basename $out_dir_org) # Take just the last part of the directory path
+
+last_epoch=$(echo "$epochs-1" | bc)
+if [[ "$ckpt" == "" ]]; then
+    ckpt="$out_dir/logs/version_0/checkpoints/epoch/epoch=$last_epoch.ckpt"
+fi
+
+  cat >ddw_config_$$.yaml <<fin
+shared:
+  project_dir: "$out_dir"
+  tomo0_files: 
+fin
+    for i in "${eventomos[@]}"; do
+        ftomo=$(readlink -f "$i")
+        echo "    - \""$ftomo"\"" >> ddw_config_$$.yaml
+        # echo "    - \""$i"\"" >> ddw_config_$$.yaml
+    done
+    echo "  tomo1_files: " >> ddw_config_$$.yaml
+    for i in "${oddtomos[@]}"; do
+        ftomo=$(readlink -f "$i")
+        echo "    - \""$ftomo"\"" >> ddw_config_$$.yaml
+        # echo "    - \""$i"\"" >> ddw_config_$$.yaml
+    done
+  cat >>ddw_config_$$.yaml <<fin
+  subtomo_size: $boxsize
+  subtomo_extraction_strides: [$zstride, $boxsize, $boxsize]
+  mw_angle: $mw
+  num_workers: $nworkers
+  gpu: $gpu
+  seed: $seed
+
+prepare_data:
+fin
+    if [[ ! "$mask" == "" ]]; then
+        echo "  mask_files:" >> ddw_config_$$.yaml
+        mask=$(readlink -f "$mask")
+        n_tomos=${#eventomos[@]}
+        n=1
+        while [[ $n -le $n_tomos ]]; do
+          echo "        - \"$mask\"" >> ddw_config_$$.yaml
+          ((n=$n+1))
+        done
+    fi
+    
+    cat >>ddw_config_$$.yaml <<fin
+  min_nonzero_mask_fraction_in_subtomo: 0.3
+  val_fraction: $splitval
+  overwrite: True
+
+fit_model:
+    unet_params_dict:
+      chans: $nfirst
+      num_downsample_layers: $depth
+      drop_prob: $drop_prob
+    adam_params_dict: 
+      lr: 0.0004
+    num_epochs: $epochs
+    batch_size: $batch
+    update_subtomo_missing_wedges_every_n_epochs: 10
+    check_val_every_n_epochs: 10
+    save_n_models_with_lowest_val_loss: 5
+    save_n_models_with_lowest_fitting_loss: 5
+    save_model_every_n_epochs: 50
+    logger: "csv"
+
+refine_tomogram:
+    model_checkpoint_file: "$ckpt"
+    subtomo_overlap: 32
+    batch_size: 16
+fin
+
+if [[ $skiptraining == "n" ]]; then
+
+    echo "" >> submit_ddw_$$.sh
+    # echo "cd \$TMPDIR" >> submit_ddw_$$.sh
+    echo "time ddw prepare-data --config ddw_config_$$.yaml" >> submit_ddw_$$.sh
+    echo "" >> submit_ddw_$$.sh
+    # We move the subtomograms to the scratch disk given by $TMPDIR:
+    echo "mv $out_dir/subtomos \$TMPDIR" >> submit_ddw_$$.sh
+    # And link it at the original location:
+    echo "ln -fs \$TMPDIR/subtomos $out_dir/subtomos" >> submit_ddw_$$.sh
+    # echo "cd \$TMPDIR"
+    echo "time ddw fit-model --config ddw_config_$$.yaml" >> submit_ddw_$$.sh
+    # echo "mv \"\$TMPDIR/$out_dir\" $out_dir_org" >> submit_ddw_$$.sh
+    # echo "cd \$OLDPWD" >> submit_ddw_$$.sh
+    # echo "cp -r \$TMPDIR/$out_dir/logs "
+    echo "" >> submit_ddw_$$.sh
+fi
+
+if [[ $skipprediction == "n" ]]; then
+
+    echo "time ddw refine-tomogram --config ddw_config_$$.yaml" >> submit_ddw_$$.sh
+    echo "" >> submit_ddw_$$.sh
+
+    if [[ $bytes == "y" ]]; then
+      echo "for f in $out_dir/refined_tomograms/*; do" >> submit_ddw_$$.sh
+      echo "  densmatch -s \"\$f\" -target 127,20 -all -mode 0 -output \"\$f\"" >> submit_ddw_$$.sh
+      echo "  rm \"\$f~\"" >> submit_ddw_$$.sh
+      echo "done" >> submit_ddw_$$.sh
+    fi
+
+fi
+
+# echo "cd \$OLDPWD" >> submit_ddw_$$.sh
+echo "" >> submit_ddw_$$.sh
+echo "echo \"Done running DeepDeWedge.\"" >> submit_ddw_$$.sh
+echo "" >> submit_ddw_$$.sh
+
+${subcmd} submit_ddw_$$.sh
