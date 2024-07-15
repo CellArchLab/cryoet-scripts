@@ -3,6 +3,10 @@
 
 Currently the following scritps are available:
 
+* `ddw/ddw_pipeline`
+  - Dependencies:
+    - [DeepDeWedge](https://github.com/MLI-lab/DeepDeWedge)
+    - [IMOD](https://bio3d.colorado.edu/imod/)
 * `cryocare/cryocare_pipeline`
   - Dependencies:
     - [cryoCARE_pip](https://github.com/juglab/cryoCARE_pip)
@@ -36,3 +40,7 @@ will show you how to run the `isonet_pipeline` script.
 You have to modify the lines in the scripts that start with `module load` to reflect how the programs are loaded in your cluster or computing environment. This could be simply modifying the `PATH` environment variable, sourcing another script, or loading a `conda` environment, for example. If the programs are already loaded in your environment you could simply delete or comment out these lines. The exact modifications required will depend on where you want to run the scripts.
 
 Please consult with your local sysadmin or computational expert as needed. We cannot provide support for other computational environments.
+
+### Tip ###
+
+You can run the `pipeline` scripts using the `--subcmd bash` option, which will run then locally. Furthermore, you can use this option to run the desired command line within a submission script customized for your HPC environment.
