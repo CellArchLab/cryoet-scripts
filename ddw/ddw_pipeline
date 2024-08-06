@@ -36,7 +36,7 @@ Options:
 --bytes                convert predicted tomograms to bytes (MRC mode 0, with mean 127 and standard deviation of 10) to save space. IMOD needs to be available. Default: n
 --subcmd               Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
 --gpu                  Which GPU device to use. Only 1 GPU is supported. Default: 0
---partition, -p:       SLURM partition where to run the job. For sciCORE these are rtx4090 or a100. Default: rtx4090
+--partition, -p:       SLURM partition where to run the job. For sciCORE these are rtx3090, rtx4090, a100 or a100-80g. Default: rtx3090,rtx4090,100,a100-80g
 --qos, q:              SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are gpu30min, gpu6hours, gpu1day, gpu1week. Default: gpu1day
 --help, -h:            print this message.
 
