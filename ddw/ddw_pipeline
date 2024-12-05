@@ -20,24 +20,26 @@ Options:
 --mask, m:             binary mask defining where to extract subtomograms from. The same mask will be used for all tomograms.                
 --out_dir:             output directory to store project files
 --ckpt:                name of model checkpoint to be used for prediction, without extension.
---boxsize, -b:         box size in pixels. Default: 80
---zstride, -z:         z interval to sample subtomograms, in pixels. Default: 80
+--boxsize, -b:         box size in pixels. Default: 72
+--zstride, -z:         z interval to sample subtomograms, in pixels. Default: 72
 --split_val, -sp:      fraction of subtomograms to use for validation. Default: 0.1
 --mw_angle, -mw:       width of the missing wedge in degrees. Default: 70 (corresponding to an acquisition between +/- 55 degrees)
 --depth, -d:           Depth of the neural network (number of layers). Default: 3
 --nfirst, -nf:         number of initial feature channels in the network architecture. Default: 32
---epochs, -e:          number of training epochs. Default: 1000
+--epochs, -e:          number of training epochs. Default: 600
 --batch, -st:          number of subtomograms per batch. Default: 5
---nworkers:            number of data loading workers. Default: 10
+--nworkers:            number of data loading workers. Default: 8
 --drop_prob:           dropout probability to prevent overfitting, between 0.0 (disabled) and 1.0 (completely random). Default: 0.0
 --seed:                random seed. Default: 42
 --skiptraining:        whether to skip the training (i.e. predict only) or not. Default: n
 --skipprediction:      whether to skip prediction (i.e. train only) or not. Default: n
 --bytes                convert predicted tomograms to bytes (MRC mode 0, with mean 127 and standard deviation of 10) to save space. IMOD needs to be available. Default: n
 --subcmd               Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
---gpu                  Which GPU device to use. Only 1 GPU is supported. Default: 0
---partition, -p:       SLURM partition where to run the job. For sciCORE these are rtx3090, rtx4090, a100 or a100-80g. Default: rtx3090,rtx4090,100,a100-80g
---qos, q:              SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are gpu30min, gpu6hours, gpu1day, gpu1week. Default: gpu1day
+--gpu                  Which GPU device(s) to use. Default=[0,1]
+--ngpu:                Number of GPUs to use for training. Must match the number of devices specified with --gpu above. Default: 2
+--partition, -p:       SLURM partition where to run the job. Default: emgpu
+--qos, q:              SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are emgpu, gpu30min, gpu6hours, gpu1day, gpu1week. Default: emgpu
+--time                 Time limit for SLURM job. Default: 00-06:00:00
 --help, -h:            print this message.
 
 fin
@@ -50,25 +52,27 @@ if [[ $# == 0 ]]; then
 fi
 
 # Default values:
-boxsize=80
-zstride=80
+boxsize=72
+zstride=72
 splitval=0.1
 mw=70.0
-epochs=1000
+epochs=600
 batch=5
 nfirst=32
 depth=3
-nworkers=10
+nworkers=8
 drop_prob=0.0
 seed=42
 skiptraining=n
 skipprediction=n
-partition=rtx3090,rtx4090,a100,a100-80g
-qos=gpu1day
+partition=emgpu
+qos=emgpu
+timelimit="00-06:00:00"
 subcmd=sbatch
 bin=0
 bytes=n
-gpu=0
+gpu="[0,1]"
+ngpu=2
 
 # Parse arguments:
 POSITIONAL_ARGS=()
@@ -221,8 +225,18 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    --time)
+      timelimit="$2"
+      shift # past argument
+      shift # past value
+      ;;
     --gpu)
       gpu="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --ngpu)
+      ngpu="$2"
       shift # past argument
       shift # past value
       ;;
@@ -369,13 +383,13 @@ oddtomos = ${oddtomos[@]}
 outputs = ${outputs[@]}
 skiptraining = $skiptraining
 skipprediction = $skipprediction
-gpu = $gpu
+ngpu = ${ngpu}
+gpu = ${gpu}
 subcmd = $subcmd
 partition = $partition
 qos = $qos
+time = ${timelimit}
 fin
-
-ngpu=1
 
 cat > submit_ddw_$$.sh <<fin
 #!/bin/bash
@@ -389,8 +403,7 @@ cat > submit_ddw_$$.sh <<fin
 #SBATCH --partition=${partition} 
 # Number of nodes and MPI tasks per node:
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node=${ngpu}
 #SBATCH --cpus-per-task=${nworkers}
 #SBATCH --gres=gpu:${ngpu}
 #
@@ -399,6 +412,7 @@ cat > submit_ddw_$$.sh <<fin
 #
 # Wall clock limit:
 #SBATCH --qos=${qos}
+#SBATCH --time=${timelimit}
 
 module purge
 module load DeepDeWedge
@@ -462,7 +476,7 @@ fin
   subtomo_extraction_strides: [$zstride, $boxsize, $boxsize]
   mw_angle: $mw
   num_workers: $nworkers
-  gpu: $gpu
+  gpu: ${gpu}
   seed: $seed
 
 prepare_data:
@@ -501,8 +515,7 @@ fit_model:
 
 refine_tomogram:
     model_checkpoint_file: "$ckpt"
-    subtomo_overlap: 32
-    batch_size: 16
+    batch_size: 1
 fin
 
 if [[ $skiptraining == "n" ]]; then
@@ -516,7 +529,8 @@ if [[ $skiptraining == "n" ]]; then
     # And link it at the original location:
     echo "ln -fs \$TMPDIR/subtomos $out_dir/subtomos" >> submit_ddw_$$.sh
     # echo "cd \$TMPDIR"
-    echo "time ddw fit-model --config ddw_config_$$.yaml" >> submit_ddw_$$.sh
+    echo "export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True" >> submit_ddw_$$.sh
+    echo "srun time ddw fit-model --config ddw_config_$$.yaml" >> submit_ddw_$$.sh
     # echo "mv \"\$TMPDIR/$out_dir\" $out_dir_org" >> submit_ddw_$$.sh
     # echo "cd \$OLDPWD" >> submit_ddw_$$.sh
     # echo "cp -r \$TMPDIR/$out_dir/logs "
@@ -525,7 +539,7 @@ fi
 
 if [[ $skipprediction == "n" ]]; then
 
-    echo "time ddw refine-tomogram --config ddw_config_$$.yaml" >> submit_ddw_$$.sh
+    echo "srun time ddw refine-tomogram --config ddw_config_$$.yaml" >> submit_ddw_$$.sh
     echo "" >> submit_ddw_$$.sh
 
     if [[ $bytes == "y" ]]; then
