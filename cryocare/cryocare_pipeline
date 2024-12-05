@@ -32,10 +32,12 @@ Options:
 --nfirst, -nf:         number of initial feature channels in the network architecture. Default: 32
 --skiptraining:        whether to skip the training (i.e. predict only) or not. Default: n
 --skipprediction:      whether to skip prediction (i.e. train only) or not. Default: n
---bytes                convert predicted tomograms to bytes (MRC mode 0, with mean 127 and standard deviation of 10) to save space. IMOD needs to be available. Default: n
---subcmd               Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
---partition, -p:         SLURM partition where to run the job. For sciCORE these are scicore-gpu (generic), rtx4090 or a100. Default: scicore-gpu
---qos, q:                SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are gpu30min, gpu6hours, gpu1day, gpu1week. Default: gpu6hours
+--bytes:               convert predicted tomograms to bytes (MRC mode 0, with mean 127 and standard deviation of 10) to save space. IMOD needs to be available. Default: n
+--subcmd:              Submission command. Use 'bash' to run locally or 'sbatch' to submit to the cluster (SLURM). Default: sbatch
+--partition, -p:       SLURM partition where to run the job. Default: emgpu
+--qos, q:              SLURM QOS ("quality-of-service") where to run the job. The QOS defines a set of resources that can be used for a certain time on the cluster, consult sciCORE documentation for details. Possible values are emgpu, gpu30min, gpu6hours, gpu1day, gpu1week. Default: emgpu
+--time                 Time limit for SLURM job. Default: 00-06:00:00
+--ngpu:                Number of GPUs to use for training. Default: 4
 --help, -h:            print this message.
 
 fin
@@ -58,11 +60,13 @@ batch=32
 nfirst=32
 skiptraining=n
 skipprediction=n
-partition=scicore-gpu
-qos=gpu6hours
+partition=emgpu
+qos=emgpu
 subcmd=sbatch
 bin=0
 bytes=n
+ngpu=4
+timelimit="00-06:00:00"
 
 
 # Parse arguments:
@@ -201,6 +205,16 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    --time)
+      timelimit="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --ngpu)
+      ngpu="$2"
+      shift # past argument
+      shift # past value
+      ;;
     --subcmd)
       subcmd="$2"
       shift # past argument
@@ -336,7 +350,9 @@ nfirst = $nfirst
 skiptraining = $skiptraining
 skipprediction = $skipprediction
 partition = $partition
+ngpu = ${ngpu}
 qos = $qos
+time = ${timelimit}
 model = ${modelname}
 eventomos = ${eventomos[@]}
 oddtomos = ${oddtomos[@]}
@@ -344,29 +360,29 @@ outputs = ${outputs[@]}
 
 fin
 
-if [[ "$skiptraining" == "n" ]]; then
-  case $partition in
-    scicore-gpu)
-    ngpu=4
-    ;;
-    rtx4090)
-    ngpu=8
-    ;;
-    a100)
-    ngpu=4
-    ;;
-    rtx8000)
-    ngpu=2
-    ;;
-    pascal)
-    ngpu=6
-    ;;
-    *)
-    echo "Warning: unknown partition $partition! Type 'sinfo' to see partitions available."
-    echo "Consult the sciCORE user guide for more details: https://wiki.biozentrum.unibas.ch/display/scicore/4.+Queues+and+partitions"
-    exit 1
-  esac
-fi
+# if [[ "$skiptraining" == "n" ]]; then
+#   case $partition in
+#     scicore-gpu)
+#     ngpu=4
+#     ;;
+#     rtx4090)
+#     ngpu=8
+#     ;;
+#     a100)
+#     ngpu=4
+#     ;;
+#     rtx8000)
+#     ngpu=2
+#     ;;
+#     pascal)
+#     ngpu=6
+#     ;;
+#     *)
+#     echo "Warning: unknown partition $partition! Type 'sinfo' to see partitions available."
+#     echo "Consult the sciCORE user guide for more details: https://wiki.biozentrum.unibas.ch/display/scicore/4.+Queues+and+partitions"
+#     exit 1
+#   esac
+# fi
 
 if [[ "$skiptraining" == "y" ]]; then
   ngpu=1
@@ -384,9 +400,7 @@ cat > submit_cryocare_$$.sh <<fin
 #SBATCH --partition=${partition} 
 # Number of nodes and MPI tasks per node:
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=${ngpu}
+#SBATCH --ntasks-per-node=${ngpu}
 #SBATCH --gres=gpu:${ngpu}
 #
 #SBATCH --mail-type=none
@@ -394,6 +408,7 @@ cat > submit_cryocare_$$.sh <<fin
 #
 # Wall clock limit:
 #SBATCH --qos=${qos}
+#SBATCH --time=${timelimit}
 
 module purge
 module load cryoCARE
