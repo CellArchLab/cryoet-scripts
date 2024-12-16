@@ -313,13 +313,13 @@ fin
 
   fi
 
-    evenstack=basename $evenstack
-    oddstack=basename $oddstack
+    evenstack=$( basename $evenstack )
+    oddstack=$( basename $oddstack )
 
-    instack=grep InputFile newst_even.com | awk '{print $2}'
-    instack=basename $instack
-    outstack=grep OutputFile newst_even.com | awk '{print $2}'
-    outstack=basename $outstack
+    instack=$( grep InputFile newst_even.com | awk '{print $2}' )
+    instack=$( basename $instack )
+    outstack=$( grep OutputFile newst_even.com | awk '{print $2}' )
+    outstack=$( basename $outstack )
     outstackeven="${outstack%.*}_EVN.mrc"
     outstackodd="${outstack%.*}_ODD.mrc"
     sed -i "s|$instack|$evenstack|g" newst_even.com
@@ -327,8 +327,8 @@ fin
     sed -i "s|$instack|$oddstack|g" newst_odd.com
     sed -i "s|$outstack|$outstackodd|g" newst_odd.com
 
-    outrecorg=grep OutputFile tilt_even.com | awk '{print $2}'
-    outrec=basename $outrecorg
+    outrecorg=$( grep OutputFile tilt_even.com | awk '{print $2}' )
+    outrec=$( basename $outrecorg )
     outreceven="${outrec%.*}_EVN.mrc"
     outrecodd="${outrec%.*}_ODD.mrc"
     sed -i "s|$outstack|$outstackeven|g" tilt_even.com
@@ -336,8 +336,8 @@ fin
     sed -i "s|$outstack|$outstackodd|g" tilt_odd.com
     sed -i "s|$outrecorg|$outrecodd|g" tilt_odd.com
 
-    eventomos+=( readlink -f "$outreceven" )
-    oddtomos+=( readlink -f "$outrecodd" )
+    eventomos+=( $(readlink -f "$outreceven") )
+    oddtomos+=( $(readlink -f "$outrecodd") )
 
     cd $OLDPWD
 
