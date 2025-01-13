@@ -52,6 +52,12 @@ parser.add_argument("--tol",
                     required=False, 
                     help="The maximum tolerated Mean Absolute Error. This value decides when the plot ceases to be linear. Should be greater than 0. Lower values are more stringent."
                     )
+parser.add_argument("--verbose", 
+                    default=False, 
+                    action="store_true",
+                    required=False, 
+                    help="Print detailed information about the fitting at every iteration."
+                    )
 
 args = parser.parse_args()
 
@@ -65,6 +71,8 @@ strootname, _ = os.path.splitext(stfilename)
 
 inmrc = mrcfile.open(args.scoremap, permissive=True)
 scores = np.array(inmrc.data)
+if scores.dtype == 'float16':
+    scores = scores.astype('float32')
 del inmrc
 
 if args.mask:
@@ -76,6 +84,8 @@ if args.mask:
     # If mask is stored as bytes we need to convert it to binary (boolean):
     if mask.dtype == 'int8':
         mask = mask > -128
+    if mask.dtype == 'float16':
+        mask = mask.astype('float32')
 
     scores *= mask # Multiply the score map with the mask
 
@@ -95,7 +105,8 @@ while True:
  
     # Fit a linear model using polyfit
     slope, intercept = np.polyfit(x_data, y_data, deg=1)
-    print(f'Iteration {iter}, {n_points} points: {slope:.8f}x + {intercept:.8f}')
+    if args.verbose:
+        print(f'Iteration {iter}, {n_points} points: {slope:.8f}x + {intercept:.8f}')
     y_pred = slope * x_data + intercept
  
     # Calculate residuals
@@ -118,14 +129,15 @@ y_pred = slope_old * x_data + intercept_old
 print(f'n_points = {n_points_old}, thr = {thr:.3f}')
  
 # Plot the data and the fitted lines
-plt.plot(sorted, label='Data points', color='g')
+plt.plot(sorted, label='Data points', color='c')
 plt.plot(x_data, y_pred, label='Fitted line', color='m')
 plt.xlabel('X')
 plt.ylabel('Y')
+plt.title(stfilename)
 # Add a dashed horizontal line at y = y_value
 plt.axhline(y=thr, color='k', linestyle='--', label=f'thr = {thr:.3f}')
 # Ensure the tick for y_value is shown on the Y-axis
-plt.yticks(list(plt.yticks()[0]) + [thr])
+# plt.yticks(list(plt.yticks()[0]) + [thr])
 plt.legend()
 figname = strootname + "_sorted_reverse_linefit" + ext
 plt.savefig(figname)
