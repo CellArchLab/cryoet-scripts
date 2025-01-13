@@ -120,6 +120,12 @@ ctffind_group.add_argument("--phaseshift",
                     required=False, 
                     help="Find additional phase shift?"
                     )
+ctffind_group.add_argument("--ctffind4", 
+                    default=False,
+                    action="store_true",
+                    required=False, 
+                    help="Is this CTFFIND-4?"
+                    )
 ctffind_group.add_argument("--threads", 
                     type=int,
                     default=4, 
@@ -237,7 +243,9 @@ paramDictCtfFindLeft = paramDictCtfFind.copy()
 paramDictCtfFindLeft['input'] = paramDictLeft['output']
 paramDictCtfFindLeft['diag'] = strootname + '_diagnostic_output_left.mrc'
 
-ctffind_com = """ctffind << eof
+if args.ctffind4:
+
+    ctffind_com = """ctffind << eof
 %(input)s
 no
 %(diag)s
@@ -259,11 +267,41 @@ no
 eof
 """
 
+else:
+
+    ctffind_com = """ctffind << eof
+%(input)s
+No
+%(diag)s
+%(apix)f
+%(kv)f
+%(cs)f
+%(ac)f
+%(specbox)d
+%(minres)f
+%(maxres)f
+%(mindef)f
+%(maxdef)f
+%(stepdef)f
+no
+%(slow)s
+no
+%(phaseshift)s
+no
+no
+no
+eof
+"""
+
+
 # Set the OMP_NUM_THREADS environment variable
 env = os.environ.copy()
 env['OMP_NUM_THREADS'] = str(args.threads)
 
-print("\nRunning CTFFIND4 on left-side aligned stack:\n")
+if args.ctffind4:
+    print("\nRunning CTFFIND-4 on left-side of aligned stack:\n")
+else:
+    print("\nRunning CTFFIND-5 on left-side of aligned stack:\n")
 print(ctffind_com % paramDictCtfFindLeft)
 ctffind_left_out = subprocess.run([ctffind_com % paramDictCtfFindLeft], capture_output=True, text=True, shell=True, env=env)
 
@@ -271,7 +309,10 @@ paramDictCtfFindRight = paramDictCtfFind.copy()
 paramDictCtfFindRight['input'] = paramDictRight['output']
 paramDictCtfFindRight['diag'] = strootname + '_diagnostic_output_right.mrc'
 
-print("\nRunning CTFFIND4 on right-side aligned stack:\n")
+if args.ctffind4:
+    print("\nRunning CTFFIND-4 on right-side of aligned stack:\n")
+else:
+    print("\nRunning CTFFIND-5 on right-side of aligned stack:\n")
 print(ctffind_com % paramDictCtfFindRight)
 ctffind_right_out = subprocess.run([ctffind_com % paramDictCtfFindRight], capture_output=True, text=True, shell=True, env=env)
 
@@ -331,13 +372,13 @@ print("""
       
 HOW TO MAKE SENSE OF THIS PLOT:
 
-You should have now an "X" shaped plot. If this is not the case, try adjusting the CTFFIND4 parameters used by the defocusgrad script (type 'defocusgrad --help' to see all options), or inspect your data for possible problems.
+You should have now an "X" shaped plot. If this is not the case, try adjusting the CTFFIND parameters used by the defocusgrad script (type 'defocusgrad --help' to see all options), or inspect your data for possible problems.
 NOTE: not all points may be shown because outliers are automatically excluded by robust fitting with RANSAC.
 
 The LEFT side of the tilt series (blue) should have DECREASING defocus towards positive tilt angles (i.e., a negative slope).
 Conversely, the RIGHT side of the tilt series (orange) should have INCREASING defocus towards positive tilt angles (i.e., a positive slope).
 
-If your data satisfy these conditions, you can import it into RELION-4 with -1 defocus handedness. If you have the opposite trend, you need to use +1 defocus handedness.
+If your data satisfy these conditions, you can import it into RELION (v4 or v5) with -1 defocus handedness. If you have the opposite trend, you need to use +1 defocus handedness.
 If you are using other software for processing your data, please check the corresponding conventions there.
 """
 )
@@ -349,10 +390,10 @@ print("\nSlope for left-side fit: %.3f" % slope_left)
 print("Slope for right-side fit: %.3f" % slope_right)
 print("CONCLUSION:")
 if slope_left < 0 and slope_right > 0:
-    print("Import into RELION-4 using -1 tilt handedness.")
+    print("Import into RELION using -1 tilt handedness.")
     polarity = -1
 elif slope_left > 0 and slope_right < 0:
-    print("Import into RELION-4 using +1 tilt handedness.")
+    print("Import into RELION using +1 tilt handedness.")
     polarity = +1
 else:
     print("Fits for both sides have the same slope sign, results inconclusive!!!")
