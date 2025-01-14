@@ -34,6 +34,12 @@ parser.add_argument("--mask",
                     required=False, 
                     help="Path to a tomogram mask, which must have same dimensions as the input score map. Could be a slab mask created by Slabify, for example."
                     )
+parser.add_argument("--minval", 
+                    type=float,
+                    default=0.0, 
+                    required=False, 
+                    help="Minimum score to consider in the analysis. Only values greater than this will be considered."
+                    )
 parser.add_argument("--ini", 
                     type=int,
                     default=1000, 
@@ -51,6 +57,12 @@ parser.add_argument("--tol",
                     default=0.01, 
                     required=False, 
                     help="The maximum tolerated Mean Absolute Error. This value decides when the plot ceases to be linear. Should be greater than 0. Lower values are more stringent."
+                    )
+parser.add_argument("--save_thr_scoremap", 
+                    default=False, 
+                    action="store_true",
+                    required=False, 
+                    help="Save thresholded (and possibly masked) scoremap."
                     )
 parser.add_argument("--verbose", 
                     default=False, 
@@ -71,16 +83,16 @@ strootname, _ = os.path.splitext(stfilename)
 
 inmrc = mrcfile.open(args.scoremap, permissive=True)
 scores = np.array(inmrc.data)
+apix = inmrc.voxel_size
+del inmrc
 if scores.dtype == 'float16':
     scores = scores.astype('float32')
-del inmrc
 
 if args.mask:
 
     inmask = mrcfile.open(args.mask, permissive=True)
     mask = np.array(inmask.data)
     del inmask
-
     # If mask is stored as bytes we need to convert it to binary (boolean):
     if mask.dtype == 'int8':
         mask = mask > -128
@@ -88,9 +100,11 @@ if args.mask:
         mask = mask.astype('float32')
 
     scores *= mask # Multiply the score map with the mask
+    del mask
 
-sorted = np.sort(scores[scores > 0])[::-1] # Sort all scores > 0 in descending order
-del scores
+sorted = np.sort(scores[scores > args.minval])[::-1] # Sort all scores > 0 (or desired value) in descending order
+if not args.save_thr_scoremap:
+    del scores
 
 n_points = args.ini
 n_points_old = n_points
@@ -143,3 +157,9 @@ figname = strootname + "_sorted_reverse_linefit" + ext
 plt.savefig(figname)
 print("Plot saved as %s" % figname )
 plt.close()
+
+if args.save_thr_scoremap:
+    scores[scores <= thr] = 0 # We make everything below the found threshold zero
+    with mrcfile.new(strootname + "_thresholded.mrc", overwrite=True) as mrc:
+        mrc.set_data(scores)
+        mrc.voxel_size = apix
