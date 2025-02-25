@@ -28,6 +28,8 @@ Currently the following scritps are available:
   - Dependencies:
     - [LocSpiral-LocBSharpen-LocBFactor-LocOccupancy](https://github.com/1aviervargas/LocSpiral-LocBSharpen-LocBFactor-LocOccupancy/)
     - [MATLAB](https://ch.mathworks.com/products/matlab.html) 
+  * `tm/tm_find_thresh`
+  - Intended to be used with [pytom-match-pick](https://github.com/SBC-Utrecht/pytom-match-pick), [STOPGAP](https://github.com/wan-lab-vanderbilt/STOPGAP) or [GAPSTOP](https://gitlab.mpcdf.mpg.de/bturo/gapstop_tm).
 
 ## Running the scripts ##
 Type `<scriptname> --help` to see all the options available and their default values. For example:
