@@ -58,6 +58,12 @@ parser.add_argument("--tol",
                     required=False, 
                     help="The maximum tolerated Mean Absolute Error. This value decides when the plot ceases to be linear. Should be greater than 0. Lower values are more stringent."
                     )
+parser.add_argument("--percentile", 
+                    type=float,
+                    default=None, 
+                    required=False, 
+                    help="Instead of fitting a line, just take the value at this percentile of the scores. Should be between 0 and 100."
+                    )
 parser.add_argument("--save_thr_scoremap", 
                     default=False, 
                     action="store_true",
@@ -104,49 +110,58 @@ if args.mask:
     scores *= mask # Multiply the score map with the mask
 
 sorted = np.sort(scores[scores > args.minval])[::-1] # Sort all scores > 0 (or desired value) in descending order
-# if not args.save_thr_scoremap:
-#     del scores
 
-n_points = args.ini
-n_points_old = n_points
-total_points = len(sorted)
- 
-print(f'Total {total_points} points')
-iter=1
-while True:
- 
-    y_data = sorted[:n_points]
-    x_data = np.arange(n_points)
-    # print(len(y_data),len(x_data))
- 
-    # Fit a linear model using polyfit
-    slope, intercept = np.polyfit(x_data, y_data, deg=1)
-    if args.verbose:
-        print(f'Iteration {iter}, {n_points} points: {slope:.8f}x + {intercept:.8f}')
-    y_pred = slope * x_data + intercept
- 
-    # Calculate residuals
-    abs_residuals = np.abs(y_data - y_pred)
-    # print(f'Absolute residuals: min: {abs_residuals.min():.6f}, max: {abs_residuals.max():.6f}, mean: {abs_residuals.mean():.6f}, median: {np.median(abs_residuals):.6f}, std: {abs_residuals.std():.6f}')
+if not args.percentile:
 
-    slope_old = slope
-    intercept_old = intercept
+    # if not args.save_thr_scoremap:
+    #     del scores
+
+    n_points = args.ini
     n_points_old = n_points
-    n_points = int(n_points * args.mult)
-    # n_points += args.ini
-    iter += 1
- 
-    if ( abs_residuals.mean() > args.tol ) or ( n_points > len(sorted) ) :
-        break
- 
-thr = sorted[n_points_old]
-x_data = np.arange(n_points_old)
-y_pred = slope_old * x_data + intercept_old
-print(f'n_points = {n_points_old}, thr = {thr:.3f}')
- 
+    total_points = len(sorted)
+    
+    print(f'Total {total_points} points')
+    iter=1
+    while True:
+    
+        y_data = sorted[:n_points]
+        x_data = np.arange(n_points)
+        # print(len(y_data),len(x_data))
+    
+        # Fit a linear model using polyfit
+        slope, intercept = np.polyfit(x_data, y_data, deg=1)
+        if args.verbose:
+            print(f'Iteration {iter}, {n_points} points: {slope:.8f}x + {intercept:.8f}')
+        y_pred = slope * x_data + intercept
+    
+        # Calculate residuals
+        abs_residuals = np.abs(y_data - y_pred)
+        # print(f'Absolute residuals: min: {abs_residuals.min():.6f}, max: {abs_residuals.max():.6f}, mean: {abs_residuals.mean():.6f}, median: {np.median(abs_residuals):.6f}, std: {abs_residuals.std():.6f}')
+
+        slope_old = slope
+        intercept_old = intercept
+        n_points_old = n_points
+        n_points = int(n_points * args.mult)
+        # n_points += args.ini
+        iter += 1
+    
+        if ( abs_residuals.mean() > args.tol ) or ( n_points > len(sorted) ) :
+            break
+    
+    thr = sorted[n_points_old]
+    x_data = np.arange(n_points_old)
+    y_pred = slope_old * x_data + intercept_old
+    print(f'n_points = {n_points_old}, thr = {thr:.3f}')
+    plt.plot(x_data, y_pred, label='Fitted line', color='m')
+
+else:
+
+    thr = np.percentile(sorted, args.percentile)
+    print(f'percentile = {args.percentile:.2f}, thr = {thr:.3f}')
+
 # Plot the data and the fitted lines
 plt.plot(sorted, label='Data points', color='c')
-plt.plot(x_data, y_pred, label='Fitted line', color='m')
+
 plt.xlabel('X')
 plt.ylabel('Y')
 plt.title(stfilename)
